@@ -14,6 +14,7 @@ namespace MicroLaman
         private Terra.Device laserDevice;
         private object deviceSync;
         private Action<bool, bool> stateChanged;
+        private Action beforeLaserOutputEnabled;
         private readonly List<Control> commandControls = new List<Control>();
         private readonly Label[] statusValues = new Label[9];
         private readonly Timer refreshTimer = new Timer();
@@ -51,6 +52,7 @@ namespace MicroLaman
             Terra.Device device,
             object synchronizationRoot,
             Action<bool, bool> onStateChanged,
+            Action onBeforeLaserOutputEnabled,
             bool initialLaserOutputEnabled,
             bool initialTecEnabled)
             : this()
@@ -58,6 +60,7 @@ namespace MicroLaman
             laserDevice = device ?? throw new ArgumentNullException(nameof(device));
             deviceSync = synchronizationRoot ?? throw new ArgumentNullException(nameof(synchronizationRoot));
             stateChanged = onStateChanged;
+            beforeLaserOutputEnabled = onBeforeLaserOutputEnabled;
             laserOutputEnabled = initialLaserOutputEnabled;
             tecEnabled = initialTecEnabled;
             refreshTimer.Interval = 1000;
@@ -416,6 +419,8 @@ namespace MicroLaman
         /// </summary>
         private bool SetLaserOutput(bool enabled)
         {
+            if (enabled && !laserOutputEnabled)
+                CaptureBrightFieldBeforeLaserOutput();
             bool success = ExecuteDeviceCommand(device => enabled ? device.setLDOn() : device.setLDOff());
             if (success)
             {
@@ -460,6 +465,7 @@ namespace MicroLaman
                     if (success)
                     {
                         tecEnabled = true;
+                        CaptureBrightFieldBeforeLaserOutput();
                         success = laserDevice.setLDOn();
                         if (success)
                             laserOutputEnabled = true;
@@ -491,6 +497,14 @@ namespace MicroLaman
             Action<bool, bool> callback = stateChanged;
             if (callback != null)
                 callback(laserOutputEnabled, tecEnabled);
+        }
+
+        /// <summary>在 LD 开启命令之前保存最后一张明场图，供主窗口检测区使用。</summary>
+        private void CaptureBrightFieldBeforeLaserOutput()
+        {
+            Action callback = beforeLaserOutputEnabled;
+            if (callback != null)
+                callback();
         }
 
         /// <summary>

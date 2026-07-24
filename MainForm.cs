@@ -35,6 +35,8 @@ namespace MicroLaman
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
             StartPosition = FormStartPosition.CenterScreen;
+            Resize += MainForm_Resize;
+            LayoutBrightFieldPreviewArea();
             RefreshComList();
         }
 
@@ -201,6 +203,7 @@ namespace MicroLaman
                     device,
                     laserDeviceSync,
                     UpdateLaserStates,
+                    CaptureBrightFieldBeforeLaserOutput,
                     laserEnabled,
                     tecEnabled);
                 laserSettingsForm.FormClosed += LaserSettingsForm_FormClosed;
@@ -228,6 +231,51 @@ namespace MicroLaman
         {
             laserEnabled = ldEnabled;
             tecEnabled = laserTecEnabled;
+        }
+
+        /// <summary>LD 开启命令前请求相机保存最后一张明场图。</summary>
+        private void CaptureBrightFieldBeforeLaserOutput()
+        {
+            if (cameraShowForm != null && !cameraShowForm.IsDisposed)
+                cameraShowForm.CaptureBrightFieldReferenceBeforeLaser();
+        }
+
+        /// <summary>窗口缩放时为下方参考图区保留可见空间。</summary>
+        private void MainForm_Resize(object sender, EventArgs e)
+        {
+            LayoutBrightFieldPreviewArea();
+        }
+
+        private void LayoutBrightFieldPreviewArea()
+        {
+            formsPlot1.Height = Math.Max(280, (int)(ClientSize.Height * 0.52));
+        }
+
+        /// <summary>扫描启动时将已保存的明场图和框选矩形显示到主窗口，不显示红色进度点。</summary>
+        private void ShowBrightFieldReferenceForScan()
+        {
+            Bitmap preview = null;
+            bool available = cameraShowForm != null
+                && !cameraShowForm.IsDisposed
+                && cameraShowForm.TryCreateBrightFieldReferencePreview(out preview);
+            if (!available)
+            {
+                brightFieldPreviewStatusLabel.Text = "未保存明场参考图";
+                brightFieldPreviewStatusLabel.Visible = true;
+                return;
+            }
+
+            Image old = brightFieldPreviewPictureBox.Image;
+            brightFieldPreviewPictureBox.Image = preview;
+            brightFieldPreviewStatusLabel.Visible = false;
+            if (old != null)
+                old.Dispose();
+        }
+
+        /// <summary>根据本次框选生成等比例的完整扫描矩阵图。</summary>
+        private void ShowScanMatrixForScan(IList<PointF> scanPoints, float selectionPixelAspectRatio)
+        {
+            scanMatrixPreviewControl.SetScanGrid(scanPoints, selectionPixelAspectRatio);
         }
 
         /// <summary>
@@ -349,15 +397,21 @@ namespace MicroLaman
 
             calibrationCancellation = new CancellationTokenSource();
             CancellationToken token = calibrationCancellation.Token;
+            cameraShowForm.HideSelectionOverlayForCalibration();
             CalibrateStage.Enabled = false;
-            ScanSelection.Enabled = false;
+                ScanSelection.Enabled = false;
             SetLaserControlsEnabled(false);
             IProgress<string> progress = new Progress<string>(text => CalibrateStage.Text = text);
             try
             {
-                await Task.Run(() => stageScanController.Calibrate(cameraShowForm, progress, token), token);
+                AlignmentVerificationResult verification = await Task.Run(
+                    () => stageScanController.Calibrate(cameraShowForm, progress, token),
+                    token);
                 MessageBox.Show(this,
-                    "平台定标完成。现在可以关闭明场照明、打开激光，然后执行蛇形扫描。",
+                    string.Format(
+                        "平台定标完成。\r\n自动微调后平均定位偏差：{0:F2} 像素\r\n最大定位偏差：{1:F2} 像素\r\n\r\n现在可以关闭明场照明、打开激光，然后执行蛇形扫描。",
+                        verification.AverageErrorPixels,
+                        verification.MaximumErrorPixels),
                     "平台定标",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -375,6 +429,8 @@ namespace MicroLaman
             }
             finally
             {
+                if (cameraShowForm != null && !cameraShowForm.IsDisposed)
+                    cameraShowForm.RestoreSelectionOverlayAfterCalibration();
                 calibrationCancellation.Dispose();
                 calibrationCancellation = null;
                 CalibrateStage.Text = "平台定标";
@@ -426,7 +482,9 @@ namespace MicroLaman
 
             List<PointF> scanPoints;
             string errorMessage;
-            if (!cameraShowForm.TryGetSnakeScanPoints(out scanPoints, out errorMessage))
+            float selectionPixelAspectRatio;
+            if (!cameraShowForm.TryGetSnakeScanPoints(
+                out scanPoints, out errorMessage, out selectionPixelAspectRatio))
             {
                 MessageBox.Show(this, errorMessage, "蛇形扫描",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -439,6 +497,8 @@ namespace MicroLaman
             ScanSelection.Text = "扫描中…";
             CalibrateStage.Enabled = false;
             SetLaserControlsEnabled(false);
+            ShowBrightFieldReferenceForScan();
+            ShowScanMatrixForScan(scanPoints, selectionPixelAspectRatio);
             IProgress<string> progress = new Progress<string>(text => ScanSelection.Text = text);
             try
             {

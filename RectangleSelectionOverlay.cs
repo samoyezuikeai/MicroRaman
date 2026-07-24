@@ -14,6 +14,10 @@ namespace MicroLaman
         private int xPointCount = 3;
         private int yPointCount = 3;
         private readonly List<PointF> recordedScanPoints = new List<PointF>();
+        private Bitmap staticLayer;
+        private Size staticLayerSize;
+        private int staticLayerXCount;
+        private int staticLayerYCount;
 
         /// <summary>
         /// 更新预览控件归一化坐标中的框选区域。
@@ -21,7 +25,12 @@ namespace MicroLaman
         internal void SetSelection(RectangleF selection)
         {
             lock (stateSync)
+            {
+                if (normalizedSelection == selection)
+                    return;
                 normalizedSelection = selection;
+                InvalidateStaticLayer();
+            }
         }
 
         /// <summary>
@@ -39,8 +48,13 @@ namespace MicroLaman
         {
             lock (stateSync)
             {
-                xPointCount = Math.Max(1, xCount);
-                yPointCount = Math.Max(1, yCount);
+                int normalizedXCount = Math.Max(1, xCount);
+                int normalizedYCount = Math.Max(1, yCount);
+                if (xPointCount == normalizedXCount && yPointCount == normalizedYCount)
+                    return;
+                xPointCount = normalizedXCount;
+                yPointCount = normalizedYCount;
+                InvalidateStaticLayer();
             }
         }
 
@@ -87,35 +101,60 @@ namespace MicroLaman
                 {
                     rectangle.Width -= 1;
                     rectangle.Height -= 1;
-                    using (Pen shadow = new Pen(Color.Black, 4f))
-                    using (Pen border = new Pen(Color.DeepSkyBlue, 2f))
-                    {
-                        graphics.DrawRectangle(shadow, rectangle);
-                        graphics.DrawRectangle(border, rectangle);
-                    }
-
-                    DrawScanPoints(graphics, rectangle, xCount, yCount);
+                    DrawStaticLayer(graphics, rectangle, xCount, yCount);
                 }
             }
 
             DrawRecordedScanPoints(graphics, clientSize, recordedPoints);
         }
 
-        /// <summary>
-        /// 绘制黄色目标网格点。
-        /// </summary>
-        private static void DrawScanPoints(Graphics graphics, Rectangle rectangle, int xCount, int yCount)
+        /// <summary>绘制已缓存的框线与完整黄色网格，只有尺寸或点数改变时才重新生成。</summary>
+        private void DrawStaticLayer(Graphics graphics, Rectangle rectangle, int xCount, int yCount)
         {
-            const int radius = 3;
+            Bitmap layer;
+            lock (stateSync)
+            {
+                if (staticLayer == null
+                    || staticLayerSize != rectangle.Size
+                    || staticLayerXCount != xCount
+                    || staticLayerYCount != yCount)
+                    CreateStaticLayer(rectangle.Size, xCount, yCount);
+                layer = staticLayer;
+                graphics.DrawImageUnscaled(layer, rectangle.Location);
+            }
+        }
+
+        /// <summary>释放缓存的完整网格位图。</summary>
+        internal void Dispose()
+        {
+            lock (stateSync)
+                InvalidateStaticLayer();
+        }
+
+        /// <summary>创建包含完整边框和全部黄色目标点的透明缓存图层。</summary>
+        private void CreateStaticLayer(Size size, int xCount, int yCount)
+        {
+            InvalidateStaticLayer();
+            staticLayer = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height));
+            staticLayerSize = size;
+            staticLayerXCount = xCount;
+            staticLayerYCount = yCount;
+
+            using (Graphics graphics = Graphics.FromImage(staticLayer))
+            using (Pen shadow = new Pen(Color.Black, 4f))
+            using (Pen border = new Pen(Color.DeepSkyBlue, 2f))
             using (Brush pointBrush = new SolidBrush(Color.Yellow))
             using (Pen pointOutline = new Pen(Color.Black, 1f))
             {
+                Rectangle rectangle = new Rectangle(0, 0, staticLayer.Width - 1, staticLayer.Height - 1);
+                graphics.DrawRectangle(shadow, rectangle);
+                graphics.DrawRectangle(border, rectangle);
+                const int radius = 3;
                 for (int yIndex = 0; yIndex < yCount; yIndex++)
                 {
                     float y = yCount == 1
                         ? rectangle.Top + rectangle.Height / 2f
                         : rectangle.Top + yIndex * rectangle.Height / (float)(yCount - 1);
-
                     for (int xIndex = 0; xIndex < xCount; xIndex++)
                     {
                         float x = xCount == 1
@@ -127,6 +166,17 @@ namespace MicroLaman
                     }
                 }
             }
+        }
+
+        /// <summary>释放过期的静态网格缓存。</summary>
+        private void InvalidateStaticLayer()
+        {
+            if (staticLayer != null)
+            {
+                staticLayer.Dispose();
+                staticLayer = null;
+            }
+            staticLayerSize = Size.Empty;
         }
 
         /// <summary>

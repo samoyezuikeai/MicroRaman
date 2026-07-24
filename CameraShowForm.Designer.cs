@@ -48,8 +48,8 @@
             this.yPointCountNumeric = new System.Windows.Forms.NumericUpDown();
             this.performanceLabel = new System.Windows.Forms.Label();
             this.previewPanel = new System.Windows.Forms.Panel();
-            this.statusLabel = new System.Windows.Forms.Label();
             this.stagePositionLabel = new System.Windows.Forms.Label();
+            this.statusLabel = new System.Windows.Forms.Label();
             this.controlPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.exposureNumeric)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.gainNumeric)).BeginInit();
@@ -60,7 +60,7 @@
             // 
             // controlPanel
             // 
-            this.controlPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(38)))), ((int)(((byte)(38)))), ((int)(((byte)(42)))));
+            this.controlPanel.BackColor = System.Drawing.Color.White;
             this.controlPanel.Controls.Add(this.resolutionLabel);
             this.controlPanel.Controls.Add(this.resolutionComboBox);
             this.controlPanel.Controls.Add(this.exposureLabel);
@@ -85,7 +85,7 @@
             // resolutionLabel
             // 
             this.resolutionLabel.AutoSize = true;
-            this.resolutionLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.resolutionLabel.ForeColor = System.Drawing.Color.Black;
             this.resolutionLabel.Location = new System.Drawing.Point(20, 32);
             this.resolutionLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.resolutionLabel.Name = "resolutionLabel";
@@ -110,7 +110,7 @@
             // exposureLabel
             // 
             this.exposureLabel.AutoSize = true;
-            this.exposureLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.exposureLabel.ForeColor = System.Drawing.Color.Black;
             this.exposureLabel.Location = new System.Drawing.Point(410, 32);
             this.exposureLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.exposureLabel.Name = "exposureLabel";
@@ -150,7 +150,7 @@
             // gainLabel
             // 
             this.gainLabel.AutoSize = true;
-            this.gainLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.gainLabel.ForeColor = System.Drawing.Color.Black;
             this.gainLabel.Location = new System.Drawing.Point(696, 32);
             this.gainLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.gainLabel.Name = "gainLabel";
@@ -181,7 +181,7 @@
             this.autoExposureCheckBox.AutoSize = true;
             this.autoExposureCheckBox.Checked = true;
             this.autoExposureCheckBox.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.autoExposureCheckBox.ForeColor = System.Drawing.Color.Gainsboro;
+            this.autoExposureCheckBox.ForeColor = System.Drawing.Color.Black;
             this.autoExposureCheckBox.Location = new System.Drawing.Point(890, 30);
             this.autoExposureCheckBox.Margin = new System.Windows.Forms.Padding(6);
             this.autoExposureCheckBox.Name = "autoExposureCheckBox";
@@ -221,7 +221,7 @@
             // xPointCountLabel
             // 
             this.xPointCountLabel.AutoSize = true;
-            this.xPointCountLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.xPointCountLabel.ForeColor = System.Drawing.Color.Black;
             this.xPointCountLabel.Location = new System.Drawing.Point(1372, 32);
             this.xPointCountLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.xPointCountLabel.Name = "xPointCountLabel";
@@ -251,7 +251,7 @@
             // yPointCountLabel
             // 
             this.yPointCountLabel.AutoSize = true;
-            this.yPointCountLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.yPointCountLabel.ForeColor = System.Drawing.Color.Black;
             this.yPointCountLabel.Location = new System.Drawing.Point(1496, 32);
             this.yPointCountLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.yPointCountLabel.Name = "yPointCountLabel";
@@ -281,7 +281,7 @@
             // performanceLabel
             // 
             this.performanceLabel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.performanceLabel.ForeColor = System.Drawing.Color.LightGreen;
+            this.performanceLabel.ForeColor = System.Drawing.Color.Green;
             this.performanceLabel.Location = new System.Drawing.Point(1622, 20);
             this.performanceLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
             this.performanceLabel.Name = "performanceLabel";
@@ -306,6 +306,19 @@
             this.previewPanel.MouseUp += new System.Windows.Forms.MouseEventHandler(this.PreviewPanel_MouseUp);
             this.previewPanel.Resize += new System.EventHandler(this.PreviewPanel_Resize);
             // 
+            // stagePositionLabel
+            // 
+            this.stagePositionLabel.BackColor = System.Drawing.Color.Black;
+            this.stagePositionLabel.Dock = System.Windows.Forms.DockStyle.Right;
+            this.stagePositionLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Bold);
+            this.stagePositionLabel.ForeColor = System.Drawing.Color.LimeGreen;
+            this.stagePositionLabel.Location = new System.Drawing.Point(1698, 0);
+            this.stagePositionLabel.Name = "stagePositionLabel";
+            this.stagePositionLabel.Padding = new System.Windows.Forms.Padding(12);
+            this.stagePositionLabel.Size = new System.Drawing.Size(264, 1024);
+            this.stagePositionLabel.TabIndex = 2;
+            this.stagePositionLabel.Text = "平台坐标\r\nX: ---- mm\r\nY: ---- mm\r\nZ: ---- mm";
+            // 
             // statusLabel
             // 
             this.statusLabel.BackColor = System.Drawing.Color.Transparent;
@@ -319,19 +332,6 @@
             this.statusLabel.TabIndex = 0;
             this.statusLabel.Text = "正在连接相机…";
             this.statusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-            // 
-            // stagePositionLabel
-            // 
-            this.stagePositionLabel.BackColor = System.Drawing.Color.Black;
-            this.stagePositionLabel.Dock = System.Windows.Forms.DockStyle.Right;
-            this.stagePositionLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Bold);
-            this.stagePositionLabel.ForeColor = System.Drawing.Color.LimeGreen;
-            this.stagePositionLabel.Location = new System.Drawing.Point(1698, 0);
-            this.stagePositionLabel.Name = "stagePositionLabel";
-            this.stagePositionLabel.Padding = new System.Windows.Forms.Padding(12);
-            this.stagePositionLabel.Size = new System.Drawing.Size(264, 1024);
-            this.stagePositionLabel.TabIndex = 2;
-            this.stagePositionLabel.Text = "平台坐标\r\nX: ---- mm\r\nY: ---- mm\r\nZ: ---- mm";
             // 
             // CameraShowForm
             // 

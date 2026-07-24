@@ -15,6 +15,17 @@ namespace MicroLaman
         internal double Z;
     }
 
+    /// <summary>明场定位校验的像素误差汇总。</summary>
+    internal struct AlignmentVerificationResult
+    {
+        internal int PointCount;
+        internal double AverageErrorPixels;
+        internal double MaximumErrorPixels;
+        internal double InitialAverageErrorPixels;
+        internal double InitialMaximumErrorPixels;
+        internal bool CalibrationRefined;
+    }
+
     /// <summary>
     /// 保存平台 X/Y 位移到相机图像 X/Y 位移的二维线性标定矩阵。
     /// </summary>
@@ -52,16 +63,6 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 根据平台相对原点的实际位移计算样品图像相对原图的像素位移。
-        /// </summary>
-        internal PointF StageDeltaToImageShift(double stageDeltaX, double stageDeltaY)
-        {
-            return new PointF(
-                (float)(PixelXPerStageX * stageDeltaX + PixelXPerStageY * stageDeltaY),
-                (float)(PixelYPerStageX * stageDeltaX + PixelYPerStageY * stageDeltaY));
-        }
-
-        /// <summary>
         /// 计算二维标定矩阵的行列式，用于判断 X、Y 标定方向是否可区分。
         /// </summary>
         internal double GetDeterminant()
@@ -76,11 +77,14 @@ namespace MicroLaman
     internal sealed class StageScanController
     {
         private readonly Command command = new Command();
-        private StagePosition? savedOrigin;
         private StagePixelCalibration savedCalibration;
         private int[] savedDimensions;
         private int savedImageWidth;
         private int savedImageHeight;
+        private double? savedCalibrationZ;
+        // 每个扫描点到位后等待，使平台与曝光状态稳定。
+        private const int ScanSettlingDelayMilliseconds = 750;
+        private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
         /// 获取当前控制器是否保存了可用于扫描的完整标定数据。
@@ -89,30 +93,30 @@ namespace MicroLaman
         {
             get
             {
-                return savedOrigin.HasValue
-                    && savedCalibration != null
+                return savedCalibration != null
                     && savedDimensions != null
                     && savedImageWidth > 0
-                    && savedImageHeight > 0;
+                    && savedImageHeight > 0
+                    && savedCalibrationZ.HasValue;
             }
         }
 
         /// <summary>
-        /// 清除原点和像素比例；重新连接控制器或更换相机后必须调用。
+        /// 清除像素与平台坐标标定；重新连接控制器或更换相机后必须调用。
         /// </summary>
         internal void ResetOrigin()
         {
-            savedOrigin = null;
             savedCalibration = null;
             savedDimensions = null;
             savedImageWidth = 0;
             savedImageHeight = 0;
+            savedCalibrationZ = null;
         }
 
         /// <summary>
         /// 在明场图像下重复移动 X、Y 轴，计算并保存像素与平台坐标的换算矩阵。
         /// </summary>
-        internal void Calibrate(
+        internal AlignmentVerificationResult Calibrate(
             CameraShowForm camera,
             IProgress<string> progress,
             CancellationToken cancellationToken)
@@ -131,28 +135,46 @@ namespace MicroLaman
 
             double xDistance = GetCalibrationDistance(dimensions[0]);
             double yDistance = GetCalibrationDistance(dimensions[1]);
-            PointF xCalibration = CalibrateAxisRepeated(
-                camera, origin, dimensions, xDistance, 0, "X", progress, cancellationToken);
-            PointF yCalibration = CalibrateAxisRepeated(
-                camera, origin, dimensions, 0, yDistance, "Y", progress, cancellationToken);
-
-            StagePixelCalibration calibration = new StagePixelCalibration
+            CalibrationMove[] moves = new[]
             {
-                PixelXPerStageX = xCalibration.X,
-                PixelYPerStageX = xCalibration.Y,
-                PixelXPerStageY = yCalibration.X,
-                PixelYPerStageY = yCalibration.Y
+                new CalibrationMove(xDistance, 0, "X+"),
+                new CalibrationMove(-xDistance, 0, "X−"),
+                new CalibrationMove(0, yDistance, "Y+"),
+                new CalibrationMove(0, -yDistance, "Y−"),
+                new CalibrationMove(xDistance, yDistance, "X+Y+"),
+                new CalibrationMove(-xDistance, -yDistance, "X−Y−")
             };
+            List<CenteringMeasurement> measurements = new List<CenteringMeasurement>(moves.Length);
+            for (int index = 0; index < moves.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                CalibrationMove move = moves[index];
+                progress.Report(string.Format("定标 {0} {1}/{2}", move.Name, index + 1, moves.Length));
+                measurements.Add(MeasureCalibrationMove(
+                    camera, origin, dimensions, move.DeltaX, move.DeltaY, cancellationToken));
+            }
+
+            StagePixelCalibration calibration = FitCalibration(measurements);
             if (Math.Abs(calibration.GetDeterminant()) < 1e-6)
                 throw new InvalidOperationException("图像标定失败：X、Y 两次移动得到的图像方向无法区分。");
 
-            VerifyAtOrigin(origin, command.ReadPosition(), dimensions);
-            savedOrigin = origin;
+            VerifyPosition(origin, command.ReadPosition(), dimensions);
             savedCalibration = calibration;
             savedDimensions = (int[])dimensions.Clone();
             savedImageWidth = camera.CameraImageWidth;
             savedImageHeight = camera.CameraImageHeight;
-            progress.Report("标定完成");
+            savedCalibrationZ = origin.Z;
+            progress.Report("自动校正并复测定位精度");
+            AlignmentVerificationResult verification = VerifyCentering(camera, progress, cancellationToken);
+            if (verification.MaximumErrorPixels > MaximumAllowedCenteringErrorPixels)
+            {
+                throw new InvalidOperationException(string.Format(
+                    "自动微调后最大定位偏差仍为 {0:F2} 像素，超过允许的 {1:F0} 像素。请确认明场样品纹理清晰、平台无松动后重新定标。",
+                    verification.MaximumErrorPixels,
+                    MaximumAllowedCenteringErrorPixels));
+            }
+            progress.Report(string.Format("标定完成（最大偏差 {0:F2} 像素）", verification.MaximumErrorPixels));
+            return verification;
         }
 
         /// <summary>
@@ -177,14 +199,20 @@ namespace MicroLaman
             if (currentDimensions[0] != savedDimensions[0] || currentDimensions[1] != savedDimensions[1])
                 throw new InvalidOperationException("平台坐标单位已在标定后改变，请重新执行平台定标。");
 
-            StagePosition origin = savedOrigin.Value;
+            StagePosition scanOrigin = command.ReadPosition();
+            if (HasCalibrationZChanged(scanOrigin.Z))
+            {
+                ResetOrigin();
+                throw new InvalidOperationException("检测到 Z 轴已在平台定标后移动。已清空标定缓存，请重新执行平台定标。");
+            }
+
             StagePixelCalibration calibration = savedCalibration;
-            progress.Report("返回标定原位");
-            ReturnToOrigin(camera, origin, savedDimensions);
-            camera.PrepareForNewScan();
+            camera.BeginFrozenScanPreview(cancellationToken);
 
             try
             {
+                camera.PrepareForNewScan();
+
                 for (int index = 0; index < normalizedPoints.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -196,33 +224,244 @@ namespace MicroLaman
                         imagePoint,
                         savedImageWidth,
                         savedImageHeight,
-                        origin);
+                        scanOrigin);
 
                     progress.Report(string.Format("扫描 {0}/{1}", index + 1, normalizedPoints.Count));
-                    StagePosition actual = MoveToAndVerify(target, savedDimensions);
-                    PointF imageShift = calibration.StageDeltaToImageShift(
-                        actual.X - origin.X,
-                        actual.Y - origin.Y);
-
-                    camera.SetTemporaryOverlayPixelOffset(imageShift.X, imageShift.Y);
-                    camera.RecordScanVisitAtViewCenter(imageShift.X, imageShift.Y);
+                    MoveToAndVerify(target, savedDimensions);
+                    WaitForScanPointSettling(cancellationToken);
+                    VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+                    camera.RecordScanVisit(normalized);
                 }
             }
             finally
             {
-                ReturnToOrigin(camera, origin, savedDimensions);
+                try
+                {
+                    ReturnToScanOrigin(camera, scanOrigin, savedDimensions);
+                }
+                finally
+                {
+                    camera.EndFrozenScanPreview();
+                }
             }
+        }
+
+        /// <summary>
+        /// 在明场下校验并微调标定矩阵，使中心附近目标点能更准确地移动到图像中心。
+        /// 只有复测误差变小时才保存微调后的矩阵，不执行激光扫描。
+        /// </summary>
+        internal AlignmentVerificationResult VerifyCentering(
+            CameraShowForm camera,
+            IProgress<string> progress,
+            CancellationToken cancellationToken)
+        {
+            if (!SerialPortManager.IsOpen)
+                throw new InvalidOperationException("请先连接 TANGO 控制器。");
+            if (!HasCalibration)
+                throw new InvalidOperationException("请先完成平台定标。");
+            if (camera == null || camera.IsDisposed)
+                throw new InvalidOperationException("请先打开相机窗口。");
+            if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
+                throw new InvalidOperationException("相机分辨率已在标定后改变，请重新执行平台定标。");
+
+            int[] currentDimensions = command.ReadDimensions();
+            if (currentDimensions[0] != savedDimensions[0] || currentDimensions[1] != savedDimensions[1])
+                throw new InvalidOperationException("平台坐标单位已在标定后改变，请重新执行平台定标。");
+
+            StagePosition verificationOrigin = command.ReadPosition();
+            List<PointF> testPoints = CreateCenterVerificationPoints(savedImageWidth, savedImageHeight);
+            StagePixelCalibration originalCalibration = savedCalibration;
+
+            try
+            {
+                List<CenteringMeasurement> firstMeasurements;
+                AlignmentErrorSummary initial = MeasureCentering(
+                    camera,
+                    originalCalibration,
+                    verificationOrigin,
+                    testPoints,
+                    "初测",
+                    progress,
+                    cancellationToken,
+                    out firstMeasurements);
+
+                StagePixelCalibration refinedCalibration = FitCalibration(firstMeasurements);
+                ReturnToScanOrigin(camera, verificationOrigin, savedDimensions);
+
+                List<CenteringMeasurement> secondMeasurements;
+                AlignmentErrorSummary refined = MeasureCentering(
+                    camera,
+                    refinedCalibration,
+                    verificationOrigin,
+                    testPoints,
+                    "复测",
+                    progress,
+                    cancellationToken,
+                    out secondMeasurements);
+
+                bool improved = refined.MaximumErrorPixels < initial.MaximumErrorPixels;
+                if (improved)
+                    savedCalibration = refinedCalibration;
+
+                return new AlignmentVerificationResult
+                {
+                    PointCount = testPoints.Count,
+                    InitialAverageErrorPixels = initial.AverageErrorPixels,
+                    InitialMaximumErrorPixels = initial.MaximumErrorPixels,
+                    AverageErrorPixels = improved ? refined.AverageErrorPixels : initial.AverageErrorPixels,
+                    MaximumErrorPixels = improved ? refined.MaximumErrorPixels : initial.MaximumErrorPixels,
+                    CalibrationRefined = improved
+                };
+            }
+            finally
+            {
+                ReturnToScanOrigin(camera, verificationOrigin, savedDimensions);
+            }
+        }
+
+        /// <summary>以指定矩阵完成一轮九点实测，并保留用于微调的实际位移数据。</summary>
+        private AlignmentErrorSummary MeasureCentering(
+            CameraShowForm camera,
+            StagePixelCalibration calibration,
+            StagePosition origin,
+            IList<PointF> testPoints,
+            string phase,
+            IProgress<string> progress,
+            CancellationToken cancellationToken,
+            out List<CenteringMeasurement> measurements)
+        {
+            GrayFrameSnapshot reference = camera.CaptureGrayFrame(2, 15000, cancellationToken);
+            measurements = new List<CenteringMeasurement>(testPoints.Count);
+            double totalError = 0;
+            double maximumError = 0;
+
+            for (int index = 0; index < testPoints.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                PointF imagePoint = testPoints[index];
+                StagePosition target = calibration.ImagePointToStage(
+                    imagePoint,
+                    savedImageWidth,
+                    savedImageHeight,
+                    origin);
+                progress.Report(string.Format("{0} {1}/{2}", phase, index + 1, testPoints.Count));
+                MoveToAndVerify(target, savedDimensions);
+                WaitForScanPointSettling(cancellationToken);
+                VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+
+                GrayFrameSnapshot shifted = camera.CaptureGrayFrame(2, 15000, cancellationToken);
+                ImageTranslation translation = ImageRegistration.MeasureTranslation(reference, shifted);
+                if (translation.Confidence < 8)
+                    throw new InvalidOperationException("定位校验图像纹理不足，无法可靠计算像素偏差。请保持明场照明并选择有纹理的样品区域。");
+
+                double expectedX = savedImageWidth / 2.0 - imagePoint.X;
+                double expectedY = savedImageHeight / 2.0 - imagePoint.Y;
+                double errorX = translation.X - expectedX;
+                double errorY = translation.Y - expectedY;
+                double error = Math.Sqrt(errorX * errorX + errorY * errorY);
+                totalError += error;
+                maximumError = Math.Max(maximumError, error);
+                measurements.Add(new CenteringMeasurement
+                {
+                    StageDeltaX = target.X - origin.X,
+                    StageDeltaY = target.Y - origin.Y,
+                    ImageShiftX = translation.X,
+                    ImageShiftY = translation.Y
+                });
+            }
+
+            return new AlignmentErrorSummary
+            {
+                AverageErrorPixels = totalError / testPoints.Count,
+                MaximumErrorPixels = maximumError
+            };
+        }
+
+        /// <summary>由九个实测点最小二乘拟合完整的二维平台到像素变换矩阵。</summary>
+        private static StagePixelCalibration FitCalibration(IList<CenteringMeasurement> measurements)
+        {
+            double sumXX = 0;
+            double sumXY = 0;
+            double sumYY = 0;
+            double sumStageXImageX = 0;
+            double sumStageYImageX = 0;
+            double sumStageXImageY = 0;
+            double sumStageYImageY = 0;
+            foreach (CenteringMeasurement measurement in measurements)
+            {
+                sumXX += measurement.StageDeltaX * measurement.StageDeltaX;
+                sumXY += measurement.StageDeltaX * measurement.StageDeltaY;
+                sumYY += measurement.StageDeltaY * measurement.StageDeltaY;
+                sumStageXImageX += measurement.StageDeltaX * measurement.ImageShiftX;
+                sumStageYImageX += measurement.StageDeltaY * measurement.ImageShiftX;
+                sumStageXImageY += measurement.StageDeltaX * measurement.ImageShiftY;
+                sumStageYImageY += measurement.StageDeltaY * measurement.ImageShiftY;
+            }
+
+            double determinant = sumXX * sumYY - sumXY * sumXY;
+            if (Math.Abs(determinant) < 1e-12)
+                throw new InvalidOperationException("定位校验点的运动范围不足，无法微调二维标定矩阵。");
+
+            StagePixelCalibration refined = new StagePixelCalibration
+            {
+                PixelXPerStageX = (sumStageXImageX * sumYY - sumStageYImageX * sumXY) / determinant,
+                PixelXPerStageY = (sumStageYImageX * sumXX - sumStageXImageX * sumXY) / determinant,
+                PixelYPerStageX = (sumStageXImageY * sumYY - sumStageYImageY * sumXY) / determinant,
+                PixelYPerStageY = (sumStageYImageY * sumXX - sumStageXImageY * sumXY) / determinant
+            };
+            if (Math.Abs(refined.GetDeterminant()) < 1e-6)
+                throw new InvalidOperationException("定位校验得到的微调矩阵不可逆，未保存该结果。");
+            return refined;
+        }
+
+        private struct CenteringMeasurement
+        {
+            internal double StageDeltaX;
+            internal double StageDeltaY;
+            internal double ImageShiftX;
+            internal double ImageShiftY;
+        }
+
+        private struct AlignmentErrorSummary
+        {
+            internal double AverageErrorPixels;
+            internal double MaximumErrorPixels;
+        }
+
+        /// <summary>建立中心周围 15% 视野范围内的 3×3 校验点，保证图像有足够重叠用于配准。</summary>
+        private static List<PointF> CreateCenterVerificationPoints(int imageWidth, int imageHeight)
+        {
+            float offsetX = imageWidth * 0.15f;
+            float offsetY = imageHeight * 0.15f;
+            List<PointF> points = new List<PointF>(9);
+            for (int yIndex = -1; yIndex <= 1; yIndex++)
+            {
+                for (int xIndex = -1; xIndex <= 1; xIndex++)
+                {
+                    points.Add(new PointF(
+                        imageWidth / 2f + xIndex * offsetX,
+                        imageHeight / 2f + yIndex * offsetY));
+                }
+            }
+            return points;
+        }
+
+        /// <summary>每个扫描点到位后的可取消稳定延时。</summary>
+        private static void WaitForScanPointSettling(CancellationToken cancellationToken)
+        {
+            if (cancellationToken.WaitHandle.WaitOne(ScanSettlingDelayMilliseconds))
+                cancellationToken.ThrowIfCancellationRequested();
         }
 
         /// <summary>
         /// 移动到绝对目标坐标并用 ?pos 校验；若首次未到容差范围则再执行一次绝对定位。
         /// </summary>
-        private StagePosition MoveToAndVerify(StagePosition target, int[] dimensions)
+        private void MoveToAndVerify(StagePosition target, int[] dimensions)
         {
             command.MoveAbsoluteXY(target.X, target.Y);
             StagePosition actual = command.ReadPosition();
             if (IsAtTarget(target, actual, dimensions))
-                return actual;
+                return;
 
             command.MoveAbsoluteXY(target.X, target.Y);
             actual = command.ReadPosition();
@@ -236,7 +475,6 @@ namespace MicroLaman
                     actual.Y));
             }
 
-            return actual;
         }
 
         /// <summary>
@@ -248,47 +486,34 @@ namespace MicroLaman
                 && Math.Abs(actual.Y - target.Y) <= GetPositionTolerance(dimensions[1]);
         }
 
-        /// <summary>
-        /// 对同一轴重复标定三次并取中位数，抑制偶发图像配准误差。
-        /// </summary>
-        private PointF CalibrateAxisRepeated(
+        /// <summary>判断扫描前的 Z 是否仍与定标时完全一致。</summary>
+        private bool HasCalibrationZChanged(double currentZ)
+        {
+            return !savedCalibrationZ.HasValue || Math.Abs(currentZ - savedCalibrationZ.Value) > 1e-6;
+        }
+
+        /// <summary>稳定等待结束后再次确认平台仍停在当前扫描点。</summary>
+        private static void VerifySettledScanPoint(
+            StagePosition target,
+            StagePosition actual,
+            int[] dimensions)
+        {
+            if (IsAtTarget(target, actual, dimensions))
+                return;
+
+            throw new InvalidOperationException(string.Format(
+                "平台稳定后偏离扫描点：目标 ({0:F4}, {1:F4})，实际 ({2:F4}, {3:F4})。",
+                target.X,
+                target.Y,
+                actual.X,
+                actual.Y));
+        }
+
+        /// <summary>执行一次六方向校准位移，等待图像稳定后采集配准帧，并始终返回原点。</summary>
+        private CenteringMeasurement MeasureCalibrationMove(
             CameraShowForm camera,
             StagePosition origin,
             int[] dimensions,
-            double deltaX,
-            double deltaY,
-            string axisName,
-            IProgress<string> progress,
-            CancellationToken cancellationToken)
-        {
-            const int sampleCount = 3;
-            double[] pixelXPerUnit = new double[sampleCount];
-            double[] pixelYPerUnit = new double[sampleCount];
-            for (int sample = 0; sample < sampleCount; sample++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                progress.Report(string.Format("标定 {0} {1}/{2}", axisName, sample + 1, sampleCount));
-                CalibrationAxis result = CalibrateAxis(
-                    camera, origin, deltaX, deltaY, cancellationToken);
-                VerifyAtOrigin(origin, command.ReadPosition(), dimensions);
-                double actualAxisDelta = Math.Abs(deltaX) > 0
-                    ? result.ActualDeltaX
-                    : result.ActualDeltaY;
-                pixelXPerUnit[sample] = result.Translation.X / actualAxisDelta;
-                pixelYPerUnit[sample] = result.Translation.Y / actualAxisDelta;
-            }
-
-            return new PointF(
-                (float)MedianOfThree(pixelXPerUnit[0], pixelXPerUnit[1], pixelXPerUnit[2]),
-                (float)MedianOfThree(pixelYPerUnit[0], pixelYPerUnit[1], pixelYPerUnit[2]));
-        }
-
-        /// <summary>
-        /// 沿指定轴移动一次，通过移动前后两帧图像计算像素比例和方向。
-        /// </summary>
-        private CalibrationAxis CalibrateAxis(
-            CameraShowForm camera,
-            StagePosition origin,
             double deltaX,
             double deltaY,
             CancellationToken cancellationToken)
@@ -301,6 +526,7 @@ namespace MicroLaman
                 moved = true;
                 command.MoveAbsoluteXY(origin.X + deltaX, origin.Y + deltaY);
                 StagePosition reached = command.ReadPosition();
+                WaitForScanPointSettling(cancellationToken);
                 GrayFrameSnapshot shifted = camera.CaptureGrayFrame(2, 15000, cancellationToken);
                 ImageTranslation translation = ImageRegistration.MeasureTranslation(reference, shifted);
 
@@ -313,19 +539,19 @@ namespace MicroLaman
                     throw new InvalidOperationException(
                         "标定位移超过视野的 30%，为保证前后图像仍有重叠区域，标定已停止。");
 
-                double actualAxisDelta = Math.Abs(deltaX) > 0
-                    ? reached.X - origin.X
-                    : reached.Y - origin.Y;
-                double requestedAxisDelta = Math.Abs(deltaX) > 0 ? deltaX : deltaY;
-                if (Math.Abs(actualAxisDelta) < Math.Abs(requestedAxisDelta) * 0.5)
+                double actualDeltaX = reached.X - origin.X;
+                double actualDeltaY = reached.Y - origin.Y;
+                if ((Math.Abs(deltaX) > 0 && Math.Abs(actualDeltaX) < Math.Abs(deltaX) * 0.5)
+                    || (Math.Abs(deltaY) > 0 && Math.Abs(actualDeltaY) < Math.Abs(deltaY) * 0.5))
                     throw new InvalidOperationException("平台实际标定位移过小，可能已经接近软限位。");
 
                 camera.SetTemporaryOverlayPixelOffset((float)translation.X, (float)translation.Y);
-                return new CalibrationAxis
+                return new CenteringMeasurement
                 {
-                    Translation = translation,
-                    ActualDeltaX = reached.X - origin.X,
-                    ActualDeltaY = reached.Y - origin.Y
+                    StageDeltaX = actualDeltaX,
+                    StageDeltaY = actualDeltaY,
+                    ImageShiftX = translation.X,
+                    ImageShiftY = translation.Y
                 };
             }
             finally
@@ -335,6 +561,7 @@ namespace MicroLaman
                     try
                     {
                         command.MoveAbsoluteXY(origin.X, origin.Y);
+                        VerifyPosition(origin, command.ReadPosition(), dimensions);
                         camera.WaitForFreshFrames(2, 10000, CancellationToken.None);
                     }
                     finally
@@ -346,23 +573,23 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 将平台移回定标原点、校验坐标并把框选标注恢复到原始位置。
+        /// 将平台移回本次扫描开始位置、校验坐标并恢复实时框选标注。
         /// </summary>
-        private void ReturnToOrigin(CameraShowForm camera, StagePosition origin, int[] dimensions)
+        private void ReturnToScanOrigin(CameraShowForm camera, StagePosition origin, int[] dimensions)
         {
             command.MoveAbsoluteXY(origin.X, origin.Y);
             StagePosition actual = command.ReadPosition();
-            VerifyAtOrigin(origin, actual, dimensions);
+            VerifyPosition(origin, actual, dimensions);
             camera.SetTemporaryOverlayPixelOffset(0, 0);
         }
 
         /// <summary>
-        /// 验证平台实测位置是否已经返回保存的定标原点。
+        /// 验证平台实测位置是否已经返回指定位置。
         /// </summary>
-        private static void VerifyAtOrigin(StagePosition origin, StagePosition actual, int[] dimensions)
+        private static void VerifyPosition(StagePosition expected, StagePosition actual, int[] dimensions)
         {
-            if (!IsAtTarget(origin, actual, dimensions))
-                throw new InvalidOperationException("返回定标原位失败，请检查平台状态和软限位。");
+            if (!IsAtTarget(expected, actual, dimensions))
+                throw new InvalidOperationException("平台未返回预期位置，请检查平台状态和软限位。");
         }
 
         /// <summary>
@@ -392,24 +619,19 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>
-        /// 返回三个数值的中位数。
-        /// </summary>
-        private static double MedianOfThree(double first, double second, double third)
+        /// <summary>六方向初始标定的单次相对平台位移。</summary>
+        private struct CalibrationMove
         {
-            return first + second + third
-                - Math.Min(first, Math.Min(second, third))
-                - Math.Max(first, Math.Max(second, third));
-        }
+            internal CalibrationMove(double deltaX, double deltaY, string name)
+            {
+                DeltaX = deltaX;
+                DeltaY = deltaY;
+                Name = name;
+            }
 
-        /// <summary>
-        /// 保存单轴标定得到的图像位移和平台实际位移。
-        /// </summary>
-        private struct CalibrationAxis
-        {
-            internal ImageTranslation Translation;
-            internal double ActualDeltaX;
-            internal double ActualDeltaY;
+            internal double DeltaX;
+            internal double DeltaY;
+            internal string Name;
         }
     }
 }
