@@ -82,8 +82,11 @@ namespace MicroLaman
         private int savedImageWidth;
         private int savedImageHeight;
         private double? savedCalibrationZ;
-        // 每个扫描点到位后等待，使平台与曝光状态稳定。
-        private const int ScanSettlingDelayMilliseconds = 750;
+        // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
+        private const int CalibrationSettlingDelayMilliseconds = 750;
+        private const int ScanPointPreLaserDelayMilliseconds = 200;
+        private const int LaserStabilizationDelayMilliseconds = 75;
+        private const int ScanPointLaserOperationDelayMilliseconds = 200;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -184,7 +187,9 @@ namespace MicroLaman
             CameraShowForm camera,
             IList<PointF> normalizedPoints,
             IProgress<string> progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Action<bool> setLaserOutput,
+            Action<bool> setTecOutput)
         {
             if (!SerialPortManager.IsOpen)
                 throw new InvalidOperationException("请先连接 TANGO 控制器。");
@@ -192,6 +197,10 @@ namespace MicroLaman
                 throw new InvalidOperationException("尚未完成平台定标。请在关闭激光、打开照明后先点击“平台定标”。");
             if (normalizedPoints == null || normalizedPoints.Count == 0)
                 throw new InvalidOperationException("扫描路径为空。");
+            if (setLaserOutput == null)
+                throw new ArgumentNullException(nameof(setLaserOutput));
+            if (setTecOutput == null)
+                throw new ArgumentNullException(nameof(setTecOutput));
             if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
                 throw new InvalidOperationException("相机分辨率已在标定后改变，请重新执行平台定标。");
 
@@ -211,6 +220,10 @@ namespace MicroLaman
 
             try
             {
+                // 冻结点击扫描时的当前画面后，移动平台前统一确保 LD 关闭。
+                setLaserOutput(false);
+                // TEC 在整段扫描期间保持开启，必须在第一次平台移动前启动。
+                setTecOutput(true);
                 camera.PrepareForNewScan();
 
                 for (int index = 0; index < normalizedPoints.Count; index++)
@@ -228,20 +241,48 @@ namespace MicroLaman
 
                     progress.Report(string.Format("扫描 {0}/{1}", index + 1, normalizedPoints.Count));
                     MoveToAndVerify(target, savedDimensions);
-                    WaitForScanPointSettling(cancellationToken);
+                    WaitForScanDelay(ScanPointPreLaserDelayMilliseconds, cancellationToken);
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
-                    camera.RecordScanVisit(normalized);
+
+                    setLaserOutput(true);
+                    try
+                    {
+                        WaitForScanDelay(LaserStabilizationDelayMilliseconds, cancellationToken);
+                        // 预留给该点的检测/采集操作；目前按要求仅等待。
+                        WaitForScanDelay(ScanPointLaserOperationDelayMilliseconds, cancellationToken);
+                        camera.RecordScanVisit(normalized);
+                    }
+                    finally
+                    {
+                        setLaserOutput(false);
+                    }
                 }
             }
             finally
             {
                 try
                 {
-                    ReturnToScanOrigin(camera, scanOrigin, savedDimensions);
+                    // 无论正常结束、停止还是异常，移动平台前都再次强制关闭 LD。
+                    setLaserOutput(false);
                 }
                 finally
                 {
-                    camera.EndFrozenScanPreview();
+                    try
+                    {
+                        // 安全顺序：先关闭 LD，再关闭 TEC。
+                        setTecOutput(false);
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            ReturnToScanOrigin(camera, scanOrigin, savedDimensions);
+                        }
+                        finally
+                        {
+                            camera.EndFrozenScanPreview();
+                        }
+                    }
                 }
             }
         }
@@ -346,7 +387,7 @@ namespace MicroLaman
                     origin);
                 progress.Report(string.Format("{0} {1}/{2}", phase, index + 1, testPoints.Count));
                 MoveToAndVerify(target, savedDimensions);
-                WaitForScanPointSettling(cancellationToken);
+                WaitForCalibrationSettling(cancellationToken);
                 VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
 
                 GrayFrameSnapshot shifted = camera.CaptureGrayFrame(2, 15000, cancellationToken);
@@ -446,10 +487,17 @@ namespace MicroLaman
             return points;
         }
 
-        /// <summary>每个扫描点到位后的可取消稳定延时。</summary>
-        private static void WaitForScanPointSettling(CancellationToken cancellationToken)
+        /// <summary>定标或精度复测移动后的可取消稳定延时。</summary>
+        private static void WaitForCalibrationSettling(CancellationToken cancellationToken)
         {
-            if (cancellationToken.WaitHandle.WaitOne(ScanSettlingDelayMilliseconds))
+            if (cancellationToken.WaitHandle.WaitOne(CalibrationSettlingDelayMilliseconds))
+                cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        /// <summary>蛇形扫描点内的可取消短延时。</summary>
+        private static void WaitForScanDelay(int milliseconds, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.WaitHandle.WaitOne(milliseconds))
                 cancellationToken.ThrowIfCancellationRequested();
         }
 
@@ -526,7 +574,7 @@ namespace MicroLaman
                 moved = true;
                 command.MoveAbsoluteXY(origin.X + deltaX, origin.Y + deltaY);
                 StagePosition reached = command.ReadPosition();
-                WaitForScanPointSettling(cancellationToken);
+                WaitForCalibrationSettling(cancellationToken);
                 GrayFrameSnapshot shifted = camera.CaptureGrayFrame(2, 15000, cancellationToken);
                 ImageTranslation translation = ImageRegistration.MeasureTranslation(reference, shifted);
 

@@ -203,7 +203,6 @@ namespace MicroLaman
                     device,
                     laserDeviceSync,
                     UpdateLaserStates,
-                    CaptureBrightFieldBeforeLaserOutput,
                     laserEnabled,
                     tecEnabled);
                 laserSettingsForm.FormClosed += LaserSettingsForm_FormClosed;
@@ -233,11 +232,44 @@ namespace MicroLaman
             tecEnabled = laserTecEnabled;
         }
 
-        /// <summary>LD 开启命令前请求相机保存最后一张明场图。</summary>
-        private void CaptureBrightFieldBeforeLaserOutput()
+        /// <summary>供自动蛇形扫描安全切换 LD。</summary>
+        private void SetLaserOutputForScan(bool enabled)
         {
-            if (cameraShowForm != null && !cameraShowForm.IsDisposed)
-                cameraShowForm.CaptureBrightFieldReferenceBeforeLaser();
+            lock (laserDeviceSync)
+            {
+                Terra.Device device = laserDevice;
+                if (device == null || !device.isUsbConnected())
+                    throw new InvalidOperationException("激光器尚未连接，无法执行自动蛇形扫描。");
+
+                bool success = enabled ? device.setLDOn() : device.setLDOff();
+                if (!success)
+                    throw new InvalidOperationException(enabled ? "自动打开激光失败。" : "自动关闭激光失败。");
+                laserEnabled = enabled;
+            }
+
+            LaserSettingsForm settings = laserSettingsForm;
+            if (settings != null && !settings.IsDisposed)
+                settings.SetLaserOutputStateFromScan(enabled);
+        }
+
+        /// <summary>供自动蛇形扫描控制 TEC；扫描开始前开启，结束或异常时关闭。</summary>
+        private void SetTecOutputForScan(bool enabled)
+        {
+            lock (laserDeviceSync)
+            {
+                Terra.Device device = laserDevice;
+                if (device == null || !device.isUsbConnected())
+                    throw new InvalidOperationException("激光器尚未连接，无法控制 TEC。");
+
+                bool success = enabled ? device.setTECOn() : device.setTECOff();
+                if (!success)
+                    throw new InvalidOperationException(enabled ? "自动打开 TEC 失败。" : "自动关闭 TEC 失败。");
+                tecEnabled = enabled;
+            }
+
+            LaserSettingsForm settings = laserSettingsForm;
+            if (settings != null && !settings.IsDisposed)
+                settings.SetTecOutputStateFromScan(enabled);
         }
 
         /// <summary>窗口缩放时为下方参考图区保留可见空间。</summary>
@@ -251,18 +283,32 @@ namespace MicroLaman
             formsPlot1.Height = Math.Max(280, (int)(ClientSize.Height * 0.52));
         }
 
-        /// <summary>扫描启动时将已保存的明场图和框选矩形显示到主窗口，不显示红色进度点。</summary>
-        private void ShowBrightFieldReferenceForScan()
+        /// <summary>接收相机框选完成后生成的明场图；位图所有权转移给主窗口。</summary>
+        private void CameraSelectionPreviewUpdated(Bitmap preview)
         {
-            Bitmap preview = null;
-            bool available = cameraShowForm != null
-                && !cameraShowForm.IsDisposed
-                && cameraShowForm.TryCreateBrightFieldReferencePreview(out preview);
-            if (!available)
-            {
-                brightFieldPreviewStatusLabel.Text = "未保存明场参考图";
-                brightFieldPreviewStatusLabel.Visible = true;
+            if (preview == null)
                 return;
+            if (IsDisposed || Disposing)
+            {
+                preview.Dispose();
+                return;
+            }
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action<Bitmap>(CameraSelectionPreviewUpdated), preview); }
+                catch (InvalidOperationException) { preview.Dispose(); }
+                return;
+            }
+
+            List<PointF> scanPoints;
+            string errorMessage;
+            float selectionPixelAspectRatio;
+            if (cameraShowForm != null
+                && !cameraShowForm.IsDisposed
+                && cameraShowForm.TryGetSnakeScanPoints(
+                    out scanPoints, out errorMessage, out selectionPixelAspectRatio))
+            {
+                scanMatrixPreviewControl.SetScanGrid(scanPoints, selectionPixelAspectRatio);
             }
 
             Image old = brightFieldPreviewPictureBox.Image;
@@ -270,12 +316,6 @@ namespace MicroLaman
             brightFieldPreviewStatusLabel.Visible = false;
             if (old != null)
                 old.Dispose();
-        }
-
-        /// <summary>根据本次框选生成等比例的完整扫描矩阵图。</summary>
-        private void ShowScanMatrixForScan(IList<PointF> scanPoints, float selectionPixelAspectRatio)
-        {
-            scanMatrixPreviewControl.SetScanGrid(scanPoints, selectionPixelAspectRatio);
         }
 
         /// <summary>
@@ -341,6 +381,7 @@ namespace MicroLaman
             if (cameraShowForm == null || cameraShowForm.IsDisposed)
             {
                 cameraShowForm = new CameraShowForm();
+                cameraShowForm.SelectionPreviewUpdated += CameraSelectionPreviewUpdated;
                 cameraShowForm.FormClosed += CameraShowForm_FormClosed;
                 cameraShowForm.Show(this);
                 return;
@@ -359,6 +400,9 @@ namespace MicroLaman
         /// </summary>
         private void CameraShowForm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            CameraShowForm closedCamera = sender as CameraShowForm;
+            if (closedCamera != null)
+                closedCamera.SelectionPreviewUpdated -= CameraSelectionPreviewUpdated;
             cameraShowForm = null;
             stageScanController.ResetOrigin();
         }
@@ -382,6 +426,7 @@ namespace MicroLaman
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+
             if (laserEnabled)
             {
                 MessageBox.Show(this, "定标需要清晰的样品纹理，请先关闭激光并打开明场照明。", "平台定标",
@@ -409,7 +454,7 @@ namespace MicroLaman
                     token);
                 MessageBox.Show(this,
                     string.Format(
-                        "平台定标完成。\r\n自动微调后平均定位偏差：{0:F2} 像素\r\n最大定位偏差：{1:F2} 像素\r\n\r\n现在可以关闭明场照明、打开激光，然后执行蛇形扫描。",
+                        "平台定标完成。\r\n自动微调后平均定位偏差：{0:F2} 像素\r\n最大定位偏差：{1:F2} 像素\r\n\r\n现在可以关闭明场照明，然后执行蛇形扫描。",
                         verification.AverageErrorPixels,
                         verification.MaximumErrorPixels),
                     "平台定标",
@@ -470,6 +515,13 @@ namespace MicroLaman
                 return;
             }
 
+            if (laserDevice == null)
+            {
+                MessageBox.Show(this, "请先连接激光器。", "蛇形扫描",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             if (!stageScanController.HasCalibration)
             {
                 MessageBox.Show(this,
@@ -497,12 +549,18 @@ namespace MicroLaman
             ScanSelection.Text = "扫描中…";
             CalibrateStage.Enabled = false;
             SetLaserControlsEnabled(false);
-            ShowBrightFieldReferenceForScan();
-            ShowScanMatrixForScan(scanPoints, selectionPixelAspectRatio);
             IProgress<string> progress = new Progress<string>(text => ScanSelection.Text = text);
             try
             {
-                await Task.Run(() => stageScanController.Scan(cameraShowForm, scanPoints, progress, token), token);
+                await Task.Run(
+                    () => stageScanController.Scan(
+                        cameraShowForm,
+                        scanPoints,
+                        progress,
+                        token,
+                        SetLaserOutputForScan,
+                        SetTecOutputForScan),
+                    token);
                 MessageBox.Show(this,
                     string.Format("已完成 {0} 个网格点的蛇形遍历。", scanPoints.Count),
                     "蛇形扫描",
@@ -539,6 +597,10 @@ namespace MicroLaman
                 scanCancellation.Cancel();
             if (calibrationCancellation != null)
                 calibrationCancellation.Cancel();
+            Image preview = brightFieldPreviewPictureBox.Image;
+            brightFieldPreviewPictureBox.Image = null;
+            if (preview != null)
+                preview.Dispose();
             CloseLaserSettingsWindow();
             DisconnectDevices();
             base.OnFormClosing(e);

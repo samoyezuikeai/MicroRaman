@@ -20,12 +20,6 @@ namespace MicroLaman
             ResizeRedraw = true;
         }
 
-        /// <summary>从完整蛇形点集取得网格数量和原始框选比例。</summary>
-        internal void SetScanGrid(IList<PointF> points)
-        {
-            SetScanGrid(points, 0f);
-        }
-
         /// <summary>按 CameraShow 框选的实际宽高比显示网格；仅允许整体等比缩放。</summary>
         internal void SetScanGrid(IList<PointF> points, float cameraSelectionAspectRatio)
         {
@@ -56,7 +50,7 @@ namespace MicroLaman
             Invalidate();
         }
 
-        internal void SetStatus(string text)
+        private void SetStatus(string text)
         {
             columnCount = 0;
             rowCount = 0;

@@ -26,11 +26,9 @@ namespace MicroLaman
         private readonly object snapshotStateSync = new object();
         private readonly object overlayModelSync = new object();
         private readonly AutoResetEvent snapshotReady = new AutoResetEvent(false);
-        private readonly AutoResetEvent selectionReferenceReady = new AutoResetEvent(false);
         private readonly object previewDrawSync = new object();
         private readonly object scanPreviewSync = new object();
-        private readonly object brightFieldReferenceSync = new object();
-        private readonly AutoResetEvent brightFieldReferenceReady = new AutoResetEvent(false);
+        private readonly object selectionPreviewSync = new object();
         private RectangleSelectionOverlay selectionOverlay;
         private PictureBox frozenScanPictureBox;
         private volatile bool capturing;
@@ -62,12 +60,16 @@ namespace MicroLaman
         private readonly List<PointF> recordedScanPointsImage = new List<PointF>();
         private Bitmap selectionReferenceFrame;
         private Bitmap frozenScanDisplayFrame;
-        private bool selectionReferenceRequested;
-        private int selectionReferenceRequestId;
         private bool scanPreviewFrozen;
-        private bool brightFieldReferenceRequested;
-        private int brightFieldReferenceRequestId;
-        private Bitmap lastBrightFieldReferenceFrame;
+        private bool selectionPreviewRequested;
+        private int selectionPreviewRequestId;
+        private RectangleF selectionPreviewRegion;
+        private int selectionPreviewXCount;
+        private int selectionPreviewYCount;
+        private Bitmap savedSelectionFrame;
+        private int savedSelectionFrameRequestId;
+
+        internal event Action<Bitmap> SelectionPreviewUpdated;
 
         internal int CameraImageWidth { get { return imageWidth; } }
         internal int CameraImageHeight { get { return imageHeight; } }
@@ -226,8 +228,7 @@ namespace MicroLaman
                     lock (frameArrivalSync)
                         Monitor.PulseAll(frameArrivalSync);
                     FulfillSnapshotRequest();
-                    FulfillSelectionReferenceFrameRequest();
-                    FulfillBrightFieldReferenceFrameRequest();
+                    FulfillSelectionPreviewRequest();
 
                     if (!drawInitialized)
                     {
@@ -463,7 +464,6 @@ namespace MicroLaman
             applySettingsButton.Enabled = false;
             try
             {
-                ClearBrightFieldReferenceFrame();
                 StopCamera();
                 StartCamera();
             }
@@ -528,6 +528,8 @@ namespace MicroLaman
         private void ScanPointCount_ValueChanged(object sender, EventArgs e)
         {
             UpdateOverlayGridSize();
+            if (!selectionImageRegion.IsEmpty && capturing && !scanPreviewFrozen)
+                RequestSelectionPreview();
         }
 
         /// <summary>将当前 X/Y 点数写入标注绘制器。</summary>
@@ -601,6 +603,7 @@ namespace MicroLaman
                 selectionImageRegion = ClientToImageRegion(completed, source, destination);
                 displayedSelectionImageRegion = selectionImageRegion;
                 UpdateSelectionOverlayFromImageCoordinates();
+                RequestSelectionPreview();
                 ExitRectangleTool();
             }
             else
@@ -977,94 +980,80 @@ namespace MicroLaman
             frozenScanPictureBox.Invalidate(Rectangle.Ceiling(marker));
         }
 
-        /// <summary>
-        /// 在打开激光前保存一张明场参考图。该图只供主窗口检测区显示，
-        /// 不参与蛇形扫描的冻结预览。
-        /// </summary>
-        internal bool CaptureBrightFieldReferenceBeforeLaser()
+        /// <summary>框选完成后请求下一张明场帧，并保存当次框选和完整网格参数。</summary>
+        private void RequestSelectionPreview()
         {
-            if (IsDisposed || !capturing)
-                return false;
-
-            brightFieldReferenceReady.Reset();
-            int requestId;
-            lock (brightFieldReferenceSync)
+            lock (selectionPreviewSync)
             {
-                requestId = ++brightFieldReferenceRequestId;
-                brightFieldReferenceRequested = true;
-            }
-
-            if (!brightFieldReferenceReady.WaitOne(3000))
-            {
-                lock (brightFieldReferenceSync)
-                {
-                    if (brightFieldReferenceRequestId == requestId)
-                        brightFieldReferenceRequested = false;
-                }
-                return false;
-            }
-
-            lock (brightFieldReferenceSync)
-                return lastBrightFieldReferenceFrame != null;
-        }
-
-        /// <summary>复制保存的明场图，并叠加当前框选矩形（不叠加扫描红点）。</summary>
-        internal bool TryCreateBrightFieldReferencePreview(out Bitmap preview)
-        {
-            preview = null;
-            Bitmap reference;
-            lock (brightFieldReferenceSync)
-            {
-                if (lastBrightFieldReferenceFrame == null)
-                    return false;
-                reference = new Bitmap(lastBrightFieldReferenceFrame);
-            }
-
-            try
-            {
-                RectangleF selection;
-                lock (overlayModelSync)
-                    selection = selectionImageRegion;
-
-                if (!selection.IsEmpty)
-                {
-                    float left = selection.Left * reference.Width;
-                    float top = selection.Top * reference.Height;
-                    float width = selection.Width * reference.Width;
-                    float height = selection.Height * reference.Height;
-                    float penWidth = Math.Max(2f, Math.Min(reference.Width, reference.Height) / 500f);
-                    using (Graphics graphics = Graphics.FromImage(reference))
-                    using (Pen pen = new Pen(Color.DeepSkyBlue, penWidth))
-                        graphics.DrawRectangle(pen, left, top, width, height);
-                }
-
-                preview = reference;
-                reference = null;
-                return true;
-            }
-            finally
-            {
-                if (reference != null)
-                    reference.Dispose();
+                selectionPreviewRequestId++;
+                selectionPreviewRegion = selectionImageRegion;
+                selectionPreviewXCount = (int)xPointCountNumeric.Value;
+                selectionPreviewYCount = (int)yPointCountNumeric.Value;
+                selectionPreviewRequested = true;
             }
         }
 
-        /// <summary>蛇形扫描开始前保存并冻结点击时的最后一帧。</summary>
+        /// <summary>把青色框和所有黄色网格点直接画入明场展示图。</summary>
+        private static void DrawSelectionPreviewOverlay(
+            Bitmap bitmap,
+            RectangleF normalizedRegion,
+            int xCount,
+            int yCount)
+        {
+            if (bitmap == null || normalizedRegion.IsEmpty)
+                return;
+
+            float left = normalizedRegion.Left * bitmap.Width;
+            float top = normalizedRegion.Top * bitmap.Height;
+            float width = normalizedRegion.Width * bitmap.Width;
+            float height = normalizedRegion.Height * bitmap.Height;
+            float borderWidth = Math.Max(2f, Math.Min(bitmap.Width, bitmap.Height) / 500f);
+            // 位图会在 MainForm 中按比例缩小，使用与缩放后约 3~4 像素相当的源图半径。
+            float radius = Math.Max(6f, Math.Min(bitmap.Width, bitmap.Height) / 180f);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (Pen shadow = new Pen(Color.Black, borderWidth + 2f))
+            using (Pen border = new Pen(Color.DeepSkyBlue, borderWidth))
+            using (Brush pointBrush = new SolidBrush(Color.Yellow))
+            using (Pen pointOutline = new Pen(Color.Black, 1f))
+            {
+                graphics.DrawRectangle(shadow, left, top, width, height);
+                graphics.DrawRectangle(border, left, top, width, height);
+                for (int yIndex = 0; yIndex < yCount; yIndex++)
+                {
+                    float y = yCount == 1 ? top + height / 2f : top + yIndex * height / (yCount - 1f);
+                    for (int xIndex = 0; xIndex < xCount; xIndex++)
+                    {
+                        float x = xCount == 1 ? left + width / 2f : left + xIndex * width / (xCount - 1f);
+                        RectangleF marker = new RectangleF(x - radius, y - radius, radius * 2f, radius * 2f);
+                        graphics.FillEllipse(pointBrush, marker);
+                        graphics.DrawEllipse(pointOutline, marker);
+                    }
+                }
+            }
+        }
+
+        /// <summary>蛇形扫描开始时冻结最近一次框选后保存的明场图。</summary>
         internal void BeginFrozenScanPreview(CancellationToken cancellationToken)
         {
-            selectionReferenceReady.Reset();
+            cancellationToken.ThrowIfCancellationRequested();
             ClearSelectionReferenceFrame();
-            RequestSelectionReferenceFrame();
-            int waitResult = WaitHandle.WaitAny(
-                new WaitHandle[] { selectionReferenceReady, cancellationToken.WaitHandle },
-                5000);
-            if (waitResult == 1)
+
+            lock (selectionPreviewSync)
             {
-                CancelSelectionReferenceFrameRequest();
-                cancellationToken.ThrowIfCancellationRequested();
+                Stopwatch timeout = Stopwatch.StartNew();
+                while ((savedSelectionFrame == null
+                        || savedSelectionFrameRequestId != selectionPreviewRequestId)
+                    && timeout.ElapsedMilliseconds < 5000)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Monitor.Wait(selectionPreviewSync, 100);
+                }
+                if (savedSelectionFrame != null
+                    && savedSelectionFrameRequestId == selectionPreviewRequestId)
+                    selectionReferenceFrame = new Bitmap(savedSelectionFrame);
             }
-            if (waitResult == WaitHandle.WaitTimeout)
-                CancelSelectionReferenceFrameRequest();
+            if (selectionReferenceFrame == null)
+                throw new InvalidOperationException("尚未保存框选明场图，请重新画框后再执行蛇形扫描。");
 
             lock (previewDrawSync)
             lock (scanPreviewSync)
@@ -1156,33 +1145,11 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>请求采集线程保存点击扫描后的下一张完整帧。</summary>
-        private void RequestSelectionReferenceFrame()
-        {
-            lock (scanPreviewSync)
-            {
-                selectionReferenceRequestId++;
-                selectionReferenceRequested = true;
-            }
-        }
-
-        /// <summary>取消尚未完成的扫描参考帧请求。</summary>
-        private void CancelSelectionReferenceFrameRequest()
-        {
-            lock (scanPreviewSync)
-            {
-                selectionReferenceRequestId++;
-                selectionReferenceRequested = false;
-            }
-        }
-
-        /// <summary>清除已保存的框选参考图，防止新框误用旧图。</summary>
+        /// <summary>释放本轮扫描使用的冻结图副本。</summary>
         private void ClearSelectionReferenceFrame()
         {
             lock (scanPreviewSync)
             {
-                selectionReferenceRequestId++;
-                selectionReferenceRequested = false;
                 if (selectionReferenceFrame != null)
                 {
                     selectionReferenceFrame.Dispose();
@@ -1191,98 +1158,61 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>在采集线程中保存扫描开始前的最后一张完整彩色帧。</summary>
-        private void FulfillSelectionReferenceFrameRequest()
+        /// <summary>在采集线程中生成框选后的明场展示图，并将位图所有权交给订阅者。</summary>
+        private void FulfillSelectionPreviewRequest()
         {
             int requestId;
-            lock (scanPreviewSync)
+            RectangleF region;
+            int xCount;
+            int yCount;
+            lock (selectionPreviewSync)
             {
-                if (!selectionReferenceRequested)
+                if (!selectionPreviewRequested)
                     return;
-                requestId = selectionReferenceRequestId;
-                selectionReferenceRequested = false;
+                requestId = selectionPreviewRequestId;
+                region = selectionPreviewRegion;
+                xCount = selectionPreviewXCount;
+                yCount = selectionPreviewYCount;
+                selectionPreviewRequested = false;
             }
 
-            Bitmap reference = null;
+            Bitmap capturedFrame = null;
+            Bitmap preview = null;
             try
             {
-                reference = CreateColorFrameBitmap(frame);
-            }
-            catch (Exception ex)
-            {
-                ShowCameraError("保存扫描参考图失败：" + ex.Message);
-            }
-            finally
-            {
-                lock (scanPreviewSync)
+                capturedFrame = CreateColorFrameBitmap(frame);
+                preview = new Bitmap(capturedFrame);
+                DrawSelectionPreviewOverlay(preview, region, xCount, yCount);
+                lock (selectionPreviewSync)
                 {
-                    if (requestId == selectionReferenceRequestId && reference != null)
-                    {
-                        if (selectionReferenceFrame != null)
-                            selectionReferenceFrame.Dispose();
-                        selectionReferenceFrame = reference;
-                        reference = null;
-                    }
+                    if (requestId != selectionPreviewRequestId)
+                        return;
+                    Bitmap old = savedSelectionFrame;
+                    savedSelectionFrame = capturedFrame;
+                    savedSelectionFrameRequestId = requestId;
+                    capturedFrame = null;
+                    if (old != null)
+                        old.Dispose();
+                    Monitor.PulseAll(selectionPreviewSync);
                 }
 
-                if (reference != null)
-                    reference.Dispose();
-                selectionReferenceReady.Set();
-            }
-        }
-
-        /// <summary>在采集线程中完成“打开激光前”的明场参考图保存请求。</summary>
-        private void FulfillBrightFieldReferenceFrameRequest()
-        {
-            int requestId;
-            lock (brightFieldReferenceSync)
-            {
-                if (!brightFieldReferenceRequested)
-                    return;
-                requestId = brightFieldReferenceRequestId;
-                brightFieldReferenceRequested = false;
-            }
-
-            Bitmap reference = null;
-            try
-            {
-                reference = CreateColorFrameBitmap(frame);
-                lock (brightFieldReferenceSync)
+                Action<Bitmap> handler = SelectionPreviewUpdated;
+                if (handler != null)
                 {
-                    if (requestId == brightFieldReferenceRequestId)
-                    {
-                        Bitmap old = lastBrightFieldReferenceFrame;
-                        lastBrightFieldReferenceFrame = reference;
-                        reference = null;
-                        if (old != null)
-                            old.Dispose();
-                    }
+                    handler(preview);
+                    preview = null;
                 }
             }
             catch
             {
-                // 激光开关不应因参考图保存失败而中断；主窗口会保持等待提示。
+                // 展示图生成失败不应中断实时相机采集。
             }
             finally
             {
-                if (reference != null)
-                    reference.Dispose();
-                brightFieldReferenceReady.Set();
-            }
-        }
-
-        /// <summary>相机参数或分辨率变更后丢弃不再匹配的明场参考图。</summary>
-        private void ClearBrightFieldReferenceFrame()
-        {
-            lock (brightFieldReferenceSync)
-            {
-                brightFieldReferenceRequestId++;
-                brightFieldReferenceRequested = false;
-                if (lastBrightFieldReferenceFrame != null)
-                {
-                    lastBrightFieldReferenceFrame.Dispose();
-                    lastBrightFieldReferenceFrame = null;
-                }
+                if (capturedFrame != null)
+                    capturedFrame.Dispose();
+                if (preview != null)
+                    preview.Dispose();
             }
         }
 
@@ -1533,17 +1463,18 @@ namespace MicroLaman
             StopCamera();
             HideFrozenScanPreview();
             ClearSelectionReferenceFrame();
-            selectionReferenceReady.Dispose();
-            lock (brightFieldReferenceSync)
+            lock (selectionPreviewSync)
             {
-                brightFieldReferenceRequested = false;
-                if (lastBrightFieldReferenceFrame != null)
+                selectionPreviewRequestId++;
+                selectionPreviewRequested = false;
+                Monitor.PulseAll(selectionPreviewSync);
+                if (savedSelectionFrame != null)
                 {
-                    lastBrightFieldReferenceFrame.Dispose();
-                    lastBrightFieldReferenceFrame = null;
+                    savedSelectionFrame.Dispose();
+                    savedSelectionFrame = null;
                 }
             }
-            brightFieldReferenceReady.Dispose();
+            SelectionPreviewUpdated = null;
         }
 
         /// <summary>按 SDK 要求依次停止采集并释放绘制器、缓冲区、设备和 API。</summary>
