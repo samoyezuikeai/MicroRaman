@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Management;
+using Terra;
 
 namespace MicroLaman
 {
@@ -21,7 +22,10 @@ namespace MicroLaman
         private static readonly TimeSpan ScanDoubleClickGuard = TimeSpan.FromMilliseconds(800);
         private readonly StageScanController stageScanController = new StageScanController();
         private readonly object laserDeviceSync = new object();
+        private readonly object spectrometerDeviceSync = new object();
         private Terra.Device laserDevice;
+        private Terra.Device spectrometerDevice;
+        private double[] laserOffSpectrum;
         private bool laserEnabled;
         private bool tecEnabled;
 
@@ -31,6 +35,7 @@ namespace MicroLaman
         public MainForm()
         {
             InitializeComponent();
+            InitializeSpectrumPlot();
             // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
@@ -75,7 +80,7 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 连接选中的 TANGO 串口并自动连接 Terra SDK 支持的 USB 激光器。
+        /// 连接选中的 TANGO 串口，并自动连接 Terra SDK 支持的 USB 激光器和光谱仪。
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
@@ -83,7 +88,7 @@ namespace MicroLaman
         {
             if (comboBoxController.SelectedItem == null)
             {
-                MessageBox.Show(this, "请选择控制台串口。激光器将通过 Terra SDK 自动检测。", "连接设备",
+                MessageBox.Show(this, "请选择控制台串口。激光器和光谱仪将通过 Terra SDK 自动检测。", "连接设备",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -96,15 +101,15 @@ namespace MicroLaman
             {
                 await Task.Run(() => ConnectDevices(controllerPort));
                 stageScanController.ResetOrigin();
-                UpdateLaserConnectionAppearance();
+                UpdateDeviceConnectionAppearance();
                 SetLaserControlsEnabled(true);
-                MessageBox.Show(this, "TANGO 控制台和 USB 激光器均已连接。", "连接设备",
+                MessageBox.Show(this, "TANGO 控制台、USB 激光器和光谱仪均已连接。", "连接设备",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 DisconnectDevices();
-                UpdateLaserConnectionAppearance();
+                UpdateDeviceConnectionAppearance();
                 MessageBox.Show(this, ex.Message, "设备连接失败",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -115,7 +120,7 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 依次连接并验证 TANGO 串口和 Terra USB 激光器；任意一步失败都会回滚两个连接。
+        /// 依次连接并验证 TANGO 串口、Terra USB 激光器和光谱仪；任意一步失败都会回滚全部连接。
         /// </summary>
         private void ConnectDevices(string controllerPort)
         {
@@ -129,19 +134,24 @@ namespace MicroLaman
                     new Command().ReadDimensions();
 
                     List<Terra.Device> devices = Terra.DeviceWrapper.openAndReadAllDevices();
-                    Terra.Device connectedDevice = FindConnectedLaserDevice(devices);
-                    if (connectedDevice == null)
+                    if (devices == null || devices.Count < 2)
                         throw new InvalidOperationException(
-                            "Terra SDK 未发现可用的 USB 激光器，请检查 USB 连接、驱动和设备占用状态。");
-                    if (!connectedDevice.isUsbConnected())
-                        throw new InvalidOperationException("已发现激光器，但 Terra SDK 报告 USB 尚未连接。");
+                            "Terra SDK 未同时发现 THBD 激光器和 GODZILLA 光谱仪，请检查两台设备的 USB 连接。");
 
-                    if (!connectedDevice.setLDOff())
-                        throw new InvalidOperationException("激光器已连接，但无法确认激光处于关闭状态。");
-                    if (!connectedDevice.setTECOff())
-                        throw new InvalidOperationException("激光器已连接，但无法确认 TEC 处于关闭状态。");
+                    // 已由实际硬件验证：THBD 激光器是 devices[0]，GODZILLA 光谱仪是 devices[1]。
+                    Terra.Device connectedLaser = devices[0];
+                    Terra.Device connectedSpectrometer = devices[1];
+                    if (!connectedLaser.isUsbConnected())
+                        throw new InvalidOperationException("THBD 激光器 USB 尚未连接。");
+                    if (!connectedSpectrometer.isUsbConnected())
+                        throw new InvalidOperationException("GODZILLA 光谱仪 USB 尚未连接。");
 
-                    laserDevice = connectedDevice;
+                    // 连接阶段只确认设备并安全关闭激光器，不修改光谱仪的采集参数。
+                    // 保留光谱仪当前已验证可用的积分时间与平均次数。
+                    connectedLaser.setLDOff();
+                    connectedLaser.setTECOff();
+                    laserDevice = connectedLaser;
+                    spectrometerDevice = connectedSpectrometer;
                     laserEnabled = false;
                     tecEnabled = false;
                 }
@@ -155,32 +165,11 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 从 Terra 枚举结果中按 SDK 设备类型和 USB 状态查找激光器，不依赖 Windows 设备名称。
+        /// THBD 在 Terra SDK 中以 Others 类型出现，控制命令成功发送时也可能固定返回 false。
         /// </summary>
-        private static Terra.Device FindConnectedLaserDevice(IList<Terra.Device> devices)
+        private static bool IsThbdLaser(Terra.Device device)
         {
-            if (devices == null || devices.Count == 0)
-                return null;
-
-            List<Terra.Device> connectedDevices = new List<Terra.Device>();
-            foreach (Terra.Device device in devices)
-            {
-                bool connected;
-                try { connected = device.isUsbConnected(); } catch { continue; }
-                if (!connected)
-                    continue;
-
-                connectedDevices.Add(device);
-
-                string deviceType = null;
-                try { deviceType = Terra.DeviceWrapper.getName(device.getIndex()); } catch { }
-                if (!string.IsNullOrWhiteSpace(deviceType)
-                    && deviceType.IndexOf("Laser", StringComparison.OrdinalIgnoreCase) >= 0)
-                    return device;
-            }
-
-            // 某些 Terra SDK/固件版本不返回类型名称；仅有一个已连接设备时可安全交给后续 LD/TEC 指令验证。
-            return connectedDevices.Count == 1 ? connectedDevices[0] : null;
+            return device != null && device.GetType().FullName == "Terra.Others";
         }
 
         /// <summary>
@@ -242,7 +231,7 @@ namespace MicroLaman
                     throw new InvalidOperationException("激光器尚未连接，无法执行自动蛇形扫描。");
 
                 bool success = enabled ? device.setLDOn() : device.setLDOff();
-                if (!success)
+                if (!success && !IsThbdLaser(device))
                     throw new InvalidOperationException(enabled ? "自动打开激光失败。" : "自动关闭激光失败。");
                 laserEnabled = enabled;
             }
@@ -262,7 +251,7 @@ namespace MicroLaman
                     throw new InvalidOperationException("激光器尚未连接，无法控制 TEC。");
 
                 bool success = enabled ? device.setTECOn() : device.setTECOff();
-                if (!success)
+                if (!success && !IsThbdLaser(device))
                     throw new InvalidOperationException(enabled ? "自动打开 TEC 失败。" : "自动关闭 TEC 失败。");
                 tecEnabled = enabled;
             }
@@ -270,6 +259,136 @@ namespace MicroLaman
             LaserSettingsForm settings = laserSettingsForm;
             if (settings != null && !settings.IsDisposed)
                 settings.SetTecOutputStateFromScan(enabled);
+        }
+
+        /// <summary>同步采集当前光谱；开激光后使用同一点的关激光光谱扣除背景。</summary>
+        private void AcquireSpectrumForScan(bool laserOn)
+        {
+            double[] wavelengths;
+            double[] intensities;
+            double excitationWavelength;
+            lock (spectrometerDeviceSync)
+            {
+                Terra.Device device = spectrometerDevice;
+                if (device == null || !device.isUsbConnected())
+                    throw new InvalidOperationException("光谱仪连接已断开，扫描已安全停止。");
+
+                // 采集在扫描工作线程中完成；本次光谱有效返回前平台不会继续移动。
+                intensities = AcquireValidSpectrum(device);
+                wavelengths = device.getWavelengths();
+                excitationWavelength = device.getLaserWavelength();
+                if (excitationWavelength <= 0)
+                    excitationWavelength = device.excitedWaveLength;
+                if (excitationWavelength <= 0 && laserDevice != null)
+                    excitationWavelength = laserDevice.getLaserWavelength();
+                if (excitationWavelength <= 0 && laserDevice != null)
+                    excitationWavelength = laserDevice.excitedWaveLength;
+            }
+
+            if (wavelengths == null || wavelengths.Length != intensities.Length)
+                throw new InvalidOperationException("光谱仪返回的波长与强度数据长度不一致，扫描已安全停止。");
+            if (excitationWavelength <= 0)
+                throw new InvalidOperationException(
+                    "Terra SDK 未提供有效的激发波长，无法计算拉曼位移。请先在设备参数中设置实际激光波长。");
+
+            double[] acquired = (double[])intensities.Clone();
+            if (!laserOn)
+            {
+                laserOffSpectrum = acquired;
+                ShowProcessedRamanSpectrum(wavelengths, acquired, excitationWavelength, "激光关闭背景谱");
+                return;
+            }
+
+            if (laserOffSpectrum == null || laserOffSpectrum.Length != acquired.Length)
+                throw new InvalidOperationException("当前扫描点缺少匹配的关激光背景光谱，扫描已安全停止。");
+
+            double[] corrected = new double[acquired.Length];
+            for (int index = 0; index < corrected.Length; index++)
+                corrected[index] = acquired[index] - laserOffSpectrum[index];
+            laserOffSpectrum = null;
+            ShowProcessedRamanSpectrum(wavelengths, corrected, excitationWavelength, "背景扣除拉曼谱");
+        }
+
+        private static double[] AcquireValidSpectrum(Terra.Device device)
+        {
+            // 恢复此前实际采集成功的直接读取方式：连续读取三次，不重置积分状态。
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                double[] spectrum = device.getSpectrum();
+                if (spectrum != null && spectrum.Length > 1)
+                    return spectrum;
+            }
+
+            throw new InvalidOperationException("光谱仪未返回有效光谱，扫描已安全停止。请检查积分时间设置。");
+        }
+
+        private void ShowProcessedRamanSpectrum(
+            double[] wavelengths,
+            double[] intensities,
+            double excitationWavelength,
+            string title)
+        {
+            List<double> shifts = new List<double>();
+            List<double> values = new List<double>();
+            for (int index = 0; index < wavelengths.Length; index++)
+            {
+                double wavelength = wavelengths[index];
+                double intensity = intensities[index];
+                if (wavelength <= 0 || double.IsNaN(wavelength) || double.IsInfinity(wavelength)
+                    || double.IsNaN(intensity) || double.IsInfinity(intensity))
+                    continue;
+
+                // 标准拉曼位移：正值为 Stokes 区，负值为反 Stokes 区，单位 cm⁻¹。
+                double shift = 10000000.0 * (1.0 / excitationWavelength - 1.0 / wavelength);
+                shifts.Add(shift);
+                values.Add(intensity);
+            }
+
+            if (shifts.Count < 2)
+                throw new InvalidOperationException("光谱仪当前波长范围内没有足够的有效拉曼数据。");
+
+            double[] x = shifts.ToArray();
+            double[] y = values.ToArray();
+            Array.Sort(x, y);
+            ShowSpectrum(x, y, title);
+        }
+
+        private void InitializeSpectrumPlot()
+        {
+            const string plotFont = "Microsoft YaHei UI";
+            ScottPlot.Fonts.Default = plotFont;
+            formsPlot1.Plot.Title("等待光谱采集");
+            formsPlot1.Plot.XLabel("拉曼位移 (cm⁻¹)");
+            formsPlot1.Plot.YLabel("强度");
+            formsPlot1.Plot.Axes.Title.Label.FontName = plotFont;
+            formsPlot1.Plot.Axes.Bottom.Label.FontName = plotFont;
+            formsPlot1.Plot.Axes.Bottom.TickLabelStyle.FontName = plotFont;
+            formsPlot1.Plot.Axes.Left.Label.FontName = plotFont;
+            formsPlot1.Plot.Axes.Left.TickLabelStyle.FontName = plotFont;
+            formsPlot1.Plot.Font.Automatic();
+            formsPlot1.Refresh();
+        }
+
+        private void ShowSpectrum(double[] ramanShifts, double[] intensities, string title)
+        {
+            if (IsDisposed || Disposing)
+                return;
+            if (InvokeRequired)
+            {
+                Invoke(new Action<double[], double[], string>(ShowSpectrum),
+                    ramanShifts, intensities, title);
+                return;
+            }
+
+            formsPlot1.Plot.Clear();
+            ScottPlot.Plottables.Scatter spectrum = formsPlot1.Plot.Add.Scatter(ramanShifts, intensities);
+            spectrum.MarkerSize = 0;
+            spectrum.LineWidth = 1.5F;
+            formsPlot1.Plot.Title(title);
+            formsPlot1.Plot.XLabel("拉曼位移(cm⁻¹)");
+            formsPlot1.Plot.YLabel("强度");
+            formsPlot1.Plot.Axes.AutoScale();
+            formsPlot1.Refresh();
         }
 
         /// <summary>窗口缩放时为下方参考图区保留可见空间。</summary>
@@ -331,11 +450,11 @@ namespace MicroLaman
         /// <summary>
         /// 根据当前连接状态更新主窗口标签和已打开的设置窗口。
         /// </summary>
-        private void UpdateLaserConnectionAppearance()
+        private void UpdateDeviceConnectionAppearance()
         {
-            label2.Text = laserDevice == null
-                ? "激光器：未连接"
-                : "激光器：已连接";
+            label2.Text = laserDevice == null ? "激光器：未连接" : "激光器：已连接";
+            labelSpectrometer.Text = spectrometerDevice == null ? "光谱仪：未连接" : "光谱仪：已连接";
+            LaserSettings.Enabled = laserDevice != null;
             if (laserSettingsForm != null && !laserSettingsForm.IsDisposed)
                 laserSettingsForm.RefreshDeviceState();
         }
@@ -356,6 +475,19 @@ namespace MicroLaman
         /// </summary>
         private void DisconnectDevices()
         {
+            Terra.Device spectrumDevice = spectrometerDevice;
+            if (spectrumDevice != null)
+            {
+                // stopSpectrum() 专门用于中断尚未完成的同步 getSpectrum()，不能等待采集锁。
+                try { spectrumDevice.stopSpectrum(); } catch { }
+            }
+
+            lock (spectrometerDeviceSync)
+            {
+                spectrometerDevice = null;
+                laserOffSpectrum = null;
+            }
+
             lock (laserDeviceSync)
             {
                 Terra.Device device = laserDevice;
@@ -522,6 +654,13 @@ namespace MicroLaman
                 return;
             }
 
+            if (spectrometerDevice == null)
+            {
+                MessageBox.Show(this, "请先连接光谱仪。", "蛇形扫描",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             if (!stageScanController.HasCalibration)
             {
                 MessageBox.Show(this,
@@ -559,7 +698,8 @@ namespace MicroLaman
                         progress,
                         token,
                         SetLaserOutputForScan,
-                        SetTecOutputForScan),
+                        SetTecOutputForScan,
+                        AcquireSpectrumForScan),
                     token);
                 MessageBox.Show(this,
                     string.Format("已完成 {0} 个网格点的蛇形遍历。", scanPoints.Count),

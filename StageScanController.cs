@@ -84,9 +84,7 @@ namespace MicroLaman
         private double? savedCalibrationZ;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
-        private const int ScanPointPreLaserDelayMilliseconds = 200;
-        private const int LaserStabilizationDelayMilliseconds = 75;
-        private const int ScanPointLaserOperationDelayMilliseconds = 200;
+        private const int LaserStabilizationDelayMilliseconds = 100;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -189,7 +187,8 @@ namespace MicroLaman
             IProgress<string> progress,
             CancellationToken cancellationToken,
             Action<bool> setLaserOutput,
-            Action<bool> setTecOutput)
+            Action<bool> setTecOutput,
+            Action<bool> acquireSpectrum)
         {
             if (!SerialPortManager.IsOpen)
                 throw new InvalidOperationException("请先连接 TANGO 控制器。");
@@ -201,6 +200,8 @@ namespace MicroLaman
                 throw new ArgumentNullException(nameof(setLaserOutput));
             if (setTecOutput == null)
                 throw new ArgumentNullException(nameof(setTecOutput));
+            if (acquireSpectrum == null)
+                throw new ArgumentNullException(nameof(acquireSpectrum));
             if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
                 throw new InvalidOperationException("相机分辨率已在标定后改变，请重新执行平台定标。");
 
@@ -241,15 +242,18 @@ namespace MicroLaman
 
                     progress.Report(string.Format("扫描 {0}/{1}", index + 1, normalizedPoints.Count));
                     MoveToAndVerify(target, savedDimensions);
-                    WaitForScanDelay(ScanPointPreLaserDelayMilliseconds, cancellationToken);
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progress.Report(string.Format("关激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
+                    acquireSpectrum(false);
 
                     setLaserOutput(true);
                     try
                     {
                         WaitForScanDelay(LaserStabilizationDelayMilliseconds, cancellationToken);
-                        // 预留给该点的检测/采集操作；目前按要求仅等待。
-                        WaitForScanDelay(ScanPointLaserOperationDelayMilliseconds, cancellationToken);
+                        progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
+                        acquireSpectrum(true);
                         camera.RecordScanVisit(normalized);
                     }
                     finally
