@@ -407,7 +407,9 @@ namespace MicroLaman
             {
                 if (laserDevice == null || !laserDevice.isUsbConnected())
                     throw new InvalidOperationException("激光器尚未连接。");
-                return command(laserDevice);
+                bool success = command(laserDevice);
+                // THBD 被 Terra SDK 归类为 Others，控制命令会正常发送但固定返回 false。
+                return success || laserDevice.GetType().FullName == "Terra.Others";
             }
         }
 
@@ -456,11 +458,11 @@ namespace MicroLaman
                 if (enabled)
                 {
                     // 全部开启必须先建立 TEC 制冷，再允许 LD 发光。
-                    success = laserDevice.setTECOn();
+                    success = IsAcceptedCommandResult(laserDevice, laserDevice.setTECOn());
                     if (success)
                     {
                         tecEnabled = true;
-                        success = laserDevice.setLDOn();
+                        success = IsAcceptedCommandResult(laserDevice, laserDevice.setLDOn());
                         if (success)
                             laserOutputEnabled = true;
                     }
@@ -468,11 +470,11 @@ namespace MicroLaman
                 else
                 {
                     // 全部关闭必须先停止 LD 发光，再关闭 TEC 制冷。
-                    success = laserDevice.setLDOff();
+                    success = IsAcceptedCommandResult(laserDevice, laserDevice.setLDOff());
                     if (success)
                     {
                         laserOutputEnabled = false;
-                        success = laserDevice.setTECOff();
+                        success = IsAcceptedCommandResult(laserDevice, laserDevice.setTECOff());
                         if (success)
                             tecEnabled = false;
                     }
@@ -491,6 +493,11 @@ namespace MicroLaman
             Action<bool, bool> callback = stateChanged;
             if (callback != null)
                 callback(laserOutputEnabled, tecEnabled);
+        }
+
+        private static bool IsAcceptedCommandResult(Terra.Device device, bool success)
+        {
+            return success || (device != null && device.GetType().FullName == "Terra.Others");
         }
 
         /// <summary>
