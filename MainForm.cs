@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+<<<<<<< HEAD
 using System.Globalization;
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
 using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,12 +31,16 @@ namespace MicroLaman
         private readonly object spectrometerDeviceSync = new object();
         private Terra.Device laserDevice;
         private Terra.Device spectrometerDevice;
+<<<<<<< HEAD
         private double spectrometerIntegrationTimeMilliseconds = DefaultSpectrometerIntegrationTimeMilliseconds;
         private double spectrometerMinimumIntegrationTimeMilliseconds;
         private double spectrometerMaximumIntegrationTimeMilliseconds;
         private readonly object savedSpectrumSync = new object();
         private readonly Dictionary<int, RamanSpectrum> laserOnSpectra =
             new Dictionary<int, RamanSpectrum>();
+=======
+        private double[] laserOffSpectrum;
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         private bool laserEnabled;
         private bool tecEnabled;
 
@@ -56,9 +63,13 @@ namespace MicroLaman
         public MainForm()
         {
             InitializeComponent();
+<<<<<<< HEAD
             spectrometerIntegrationTimeTextBox.Text = FormatIntegrationTime(DefaultSpectrometerIntegrationTimeMilliseconds);
             InitializeSpectrumPlot();
             scanMatrixPreviewControl.ScanPointSelected += ScanMatrixPreviewControl_ScanPointSelected;
+=======
+            InitializeSpectrumPlot();
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
@@ -169,6 +180,7 @@ namespace MicroLaman
                     if (!connectedSpectrometer.isUsbConnected())
                         throw new InvalidOperationException("GODZILLA 光谱仪 USB 尚未连接。");
 
+<<<<<<< HEAD
                     double minimumIntegrationTime = connectedSpectrometer.getMinIntegrationTime();
                     double maximumIntegrationTime = connectedSpectrometer.getMaxIntegrationTime();
                     if (minimumIntegrationTime <= 0 || maximumIntegrationTime < minimumIntegrationTime)
@@ -179,13 +191,20 @@ namespace MicroLaman
                         minimumIntegrationTime,
                         maximumIntegrationTime);
                     connectedSpectrometer.setIntegrationTime(requestedIntegrationTime);
+=======
+                    // 连接阶段只确认设备并安全关闭激光器，不修改光谱仪的采集参数。
+                    // 保留光谱仪当前已验证可用的积分时间与平均次数。
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                     connectedLaser.setLDOff();
                     connectedLaser.setTECOff();
                     laserDevice = connectedLaser;
                     spectrometerDevice = connectedSpectrometer;
+<<<<<<< HEAD
                     spectrometerMinimumIntegrationTimeMilliseconds = minimumIntegrationTime;
                     spectrometerMaximumIntegrationTimeMilliseconds = maximumIntegrationTime;
                     spectrometerIntegrationTimeMilliseconds = requestedIntegrationTime;
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                     laserEnabled = false;
                     tecEnabled = false;
                 }
@@ -295,8 +314,13 @@ namespace MicroLaman
                 settings.SetTecOutputStateFromScan(enabled);
         }
 
+<<<<<<< HEAD
         /// <summary>在 LD 已打开且稳定后采集、显示并保存一张开激光原始拉曼谱。</summary>
         private bool AcquireSpectrumForScan(int scanIndex)
+=======
+        /// <summary>同步采集当前光谱；开激光后使用同一点的关激光光谱扣除背景。</summary>
+        private void AcquireSpectrumForScan(bool laserOn)
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         {
             double[] wavelengths;
             double[] intensities;
@@ -308,7 +332,11 @@ namespace MicroLaman
                     throw new InvalidOperationException("光谱仪连接已断开，扫描已安全停止。");
 
                 // 采集在扫描工作线程中完成；本次光谱有效返回前平台不会继续移动。
+<<<<<<< HEAD
                 intensities = AcquireStableSpectrum(device);
+=======
+                intensities = AcquireValidSpectrum(device);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                 wavelengths = device.getWavelengths();
                 excitationWavelength = device.getLaserWavelength();
                 if (excitationWavelength <= 0)
@@ -325,6 +353,7 @@ namespace MicroLaman
                 throw new InvalidOperationException(
                     "Terra SDK 未提供有效的激发波长，无法计算拉曼位移。请先在设备参数中设置实际激光波长。");
 
+<<<<<<< HEAD
             RamanSpectrum laserOnSpectrum = CreateRamanSpectrum(
                 wavelengths, (double[])intensities.Clone(), excitationWavelength);
             SaveLaserOnSpectrum(scanIndex, laserOnSpectrum);
@@ -338,6 +367,29 @@ namespace MicroLaman
 
         private static double[] AcquireStableSpectrum(Terra.Device device)
         {
+=======
+            double[] acquired = (double[])intensities.Clone();
+            if (!laserOn)
+            {
+                laserOffSpectrum = acquired;
+                ShowProcessedRamanSpectrum(wavelengths, acquired, excitationWavelength, "激光关闭背景谱");
+                return;
+            }
+
+            if (laserOffSpectrum == null || laserOffSpectrum.Length != acquired.Length)
+                throw new InvalidOperationException("当前扫描点缺少匹配的关激光背景光谱，扫描已安全停止。");
+
+            double[] corrected = new double[acquired.Length];
+            for (int index = 0; index < corrected.Length; index++)
+                corrected[index] = acquired[index] - laserOffSpectrum[index];
+            laserOffSpectrum = null;
+            ShowProcessedRamanSpectrum(wavelengths, corrected, excitationWavelength, "背景扣除拉曼谱");
+        }
+
+        private static double[] AcquireValidSpectrum(Terra.Device device)
+        {
+            // 恢复此前实际采集成功的直接读取方式：连续读取三次，不重置积分状态。
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 double[] spectrum = device.getSpectrum();
@@ -345,6 +397,7 @@ namespace MicroLaman
                     return spectrum;
             }
 
+<<<<<<< HEAD
             throw new InvalidOperationException(
                 "光谱仪未返回有效光谱，扫描已安全停止。请重新插拔光谱仪USB或者重启程序。");
         }
@@ -381,6 +434,16 @@ namespace MicroLaman
             double[] wavelengths,
             double[] intensities,
             double excitationWavelength)
+=======
+            throw new InvalidOperationException("光谱仪未返回有效光谱，扫描已安全停止。请检查积分时间设置。");
+        }
+
+        private void ShowProcessedRamanSpectrum(
+            double[] wavelengths,
+            double[] intensities,
+            double excitationWavelength,
+            string title)
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         {
             List<double> shifts = new List<double>();
             List<double> values = new List<double>();
@@ -404,6 +467,7 @@ namespace MicroLaman
             double[] x = shifts.ToArray();
             double[] y = values.ToArray();
             Array.Sort(x, y);
+<<<<<<< HEAD
             return new RamanSpectrum(x, y);
         }
 
@@ -447,13 +511,19 @@ namespace MicroLaman
                 spectrum.RamanShifts,
                 spectrum.Intensities,
                 string.Format("第 {0} 点开激光原始拉曼谱", e.ScanIndex + 1));
+=======
+            ShowSpectrum(x, y, title);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         }
 
         private void InitializeSpectrumPlot()
         {
             const string plotFont = "Microsoft YaHei UI";
             ScottPlot.Fonts.Default = plotFont;
+<<<<<<< HEAD
             formsPlot1.Plot.Clear();
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             formsPlot1.Plot.Title("等待光谱采集");
             formsPlot1.Plot.XLabel("拉曼位移 (cm⁻¹)");
             formsPlot1.Plot.YLabel("强度");
@@ -481,7 +551,10 @@ namespace MicroLaman
             ScottPlot.Plottables.Scatter spectrum = formsPlot1.Plot.Add.Scatter(ramanShifts, intensities);
             spectrum.MarkerSize = 0;
             spectrum.LineWidth = 1.5F;
+<<<<<<< HEAD
             spectrum.Color = ScottPlot.Colors.Red;
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             formsPlot1.Plot.Title(title);
             formsPlot1.Plot.XLabel("拉曼位移(cm⁻¹)");
             formsPlot1.Plot.YLabel("强度");
@@ -557,7 +630,10 @@ namespace MicroLaman
             label2.Text = laserDevice == null ? "激光器：未连接" : "激光器：已连接";
             labelSpectrometer.Text = spectrometerDevice == null ? "光谱仪：未连接" : "光谱仪：已连接";
             LaserSettings.Enabled = laserDevice != null;
+<<<<<<< HEAD
             UpdateSpectrometerIntegrationControls();
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             if (laserSettingsForm != null && !laserSettingsForm.IsDisposed)
                 laserSettingsForm.RefreshDeviceState();
         }
@@ -694,9 +770,14 @@ namespace MicroLaman
             lock (spectrometerDeviceSync)
             {
                 spectrometerDevice = null;
+<<<<<<< HEAD
             }
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
+=======
+                laserOffSpectrum = null;
+            }
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
 
             lock (laserDeviceSync)
             {
@@ -921,9 +1002,12 @@ namespace MicroLaman
                         token,
                         SetLaserOutputForScan,
                         SetTecOutputForScan,
+<<<<<<< HEAD
                         WarmUpSpectrometerForScan,
                         DiscardSpectrumForScan,
                         GetSpectrometerIntegrationTimeMillisecondsForScan(),
+=======
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                         AcquireSpectrumForScan),
                     token);
                 MessageBox.Show(this,

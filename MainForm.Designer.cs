@@ -178,6 +178,7 @@ namespace MicroLaman
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(402, 1270);
             this.panel1.TabIndex = 5;
+<<<<<<< HEAD
             // 
             // integrationRangeLabel
             // 
@@ -226,6 +227,9 @@ namespace MicroLaman
             this.integrationTimeLabel.TabIndex = 8;
             this.integrationTimeLabel.Text = "积分时间 (ms)：";
             // 
+=======
+            //
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             // LaserSettings
             // 
             this.LaserSettings.Enabled = false;
@@ -238,9 +242,15 @@ namespace MicroLaman
             this.LaserSettings.Text = "激光器设置";
             this.LaserSettings.UseVisualStyleBackColor = true;
             this.LaserSettings.Click += new System.EventHandler(this.LaserSettings_Click);
+<<<<<<< HEAD
             // 
             // labelSpectrometer
             // 
+=======
+            //
+            // labelSpectrometer
+            //
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.labelSpectrometer.AutoSize = true;
             this.labelSpectrometer.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.labelSpectrometer.Location = new System.Drawing.Point(14, 129);
@@ -249,7 +259,11 @@ namespace MicroLaman
             this.labelSpectrometer.Size = new System.Drawing.Size(204, 35);
             this.labelSpectrometer.TabIndex = 7;
             this.labelSpectrometer.Text = "光谱仪：未连接";
+<<<<<<< HEAD
             // 
+=======
+            //
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             // label2
             // 
             this.label2.AutoSize = true;
@@ -265,7 +279,11 @@ namespace MicroLaman
             // 
             this.formsPlot1.Dock = System.Windows.Forms.DockStyle.Top;
             this.formsPlot1.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+<<<<<<< HEAD
             this.formsPlot1.Location = new System.Drawing.Point(402, 80);
+=======
+            this.formsPlot1.Location = new System.Drawing.Point(348, 80);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.formsPlot1.Margin = new System.Windows.Forms.Padding(6);
             this.formsPlot1.Name = "formsPlot1";
             this.formsPlot1.Size = new System.Drawing.Size(1826, 700);
@@ -294,7 +312,11 @@ namespace MicroLaman
             this.scanMatrixGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
             this.scanMatrixGroupBox.Location = new System.Drawing.Point(15, 15);
             this.scanMatrixGroupBox.Name = "scanMatrixGroupBox";
+<<<<<<< HEAD
             this.scanMatrixGroupBox.Size = new System.Drawing.Size(895, 540);
+=======
+            this.scanMatrixGroupBox.Size = new System.Drawing.Size(922, 540);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.scanMatrixGroupBox.TabIndex = 0;
             this.scanMatrixGroupBox.TabStop = false;
             this.scanMatrixGroupBox.Text = "扫描坐标矩阵";
@@ -305,7 +327,11 @@ namespace MicroLaman
             this.scanMatrixPreviewControl.Dock = System.Windows.Forms.DockStyle.Fill;
             this.scanMatrixPreviewControl.Location = new System.Drawing.Point(3, 34);
             this.scanMatrixPreviewControl.Name = "scanMatrixPreviewControl";
+<<<<<<< HEAD
             this.scanMatrixPreviewControl.Size = new System.Drawing.Size(889, 503);
+=======
+            this.scanMatrixPreviewControl.Size = new System.Drawing.Size(916, 503);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.scanMatrixPreviewControl.TabIndex = 0;
             // 
             // brightFieldGroupBox
@@ -314,9 +340,15 @@ namespace MicroLaman
             this.brightFieldGroupBox.Controls.Add(this.brightFieldPreviewPictureBox);
             this.brightFieldGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+<<<<<<< HEAD
             this.brightFieldGroupBox.Location = new System.Drawing.Point(916, 15);
             this.brightFieldGroupBox.Name = "brightFieldGroupBox";
             this.brightFieldGroupBox.Size = new System.Drawing.Size(895, 540);
+=======
+            this.brightFieldGroupBox.Location = new System.Drawing.Point(943, 15);
+            this.brightFieldGroupBox.Name = "brightFieldGroupBox";
+            this.brightFieldGroupBox.Size = new System.Drawing.Size(922, 540);
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.brightFieldGroupBox.TabIndex = 1;
             this.brightFieldGroupBox.TabStop = false;
             this.brightFieldGroupBox.Text = "明场参考图";
@@ -329,6 +361,7 @@ namespace MicroLaman
             this.brightFieldPreviewStatusLabel.ForeColor = System.Drawing.Color.Gainsboro;
             this.brightFieldPreviewStatusLabel.Location = new System.Drawing.Point(3, 34);
             this.brightFieldPreviewStatusLabel.Name = "brightFieldPreviewStatusLabel";
+<<<<<<< HEAD
             this.brightFieldPreviewStatusLabel.Size = new System.Drawing.Size(889, 503);
             this.brightFieldPreviewStatusLabel.TabIndex = 1;
             this.brightFieldPreviewStatusLabel.Text = "等待检测开始";
@@ -336,15 +369,32 @@ namespace MicroLaman
             // 
             // brightFieldPreviewPictureBox
             // 
+=======
+            this.brightFieldPreviewStatusLabel.Size = new System.Drawing.Size(916, 503);
+            this.brightFieldPreviewStatusLabel.TabIndex = 1;
+            this.brightFieldPreviewStatusLabel.Text = "等待检测开始";
+            this.brightFieldPreviewStatusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            //
+            // brightFieldPreviewPictureBox
+            //
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             this.brightFieldPreviewPictureBox.BackColor = System.Drawing.Color.Black;
             this.brightFieldPreviewPictureBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldPreviewPictureBox.Location = new System.Drawing.Point(3, 34);
             this.brightFieldPreviewPictureBox.Name = "brightFieldPreviewPictureBox";
+<<<<<<< HEAD
             this.brightFieldPreviewPictureBox.Size = new System.Drawing.Size(889, 503);
             this.brightFieldPreviewPictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.brightFieldPreviewPictureBox.TabIndex = 0;
             this.brightFieldPreviewPictureBox.TabStop = false;
             // 
+=======
+            this.brightFieldPreviewPictureBox.Size = new System.Drawing.Size(916, 503);
+            this.brightFieldPreviewPictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.brightFieldPreviewPictureBox.TabIndex = 0;
+            this.brightFieldPreviewPictureBox.TabStop = false;
+            //
+>>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(12F, 24F);
