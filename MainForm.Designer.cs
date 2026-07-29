@@ -39,6 +39,10 @@ namespace MicroLaman
             this.CalibrateStage = new System.Windows.Forms.ToolStripButton();
             this.ScanSelection = new System.Windows.Forms.ToolStripButton();
             this.panel1 = new System.Windows.Forms.Panel();
+            this.integrationRangeLabel = new System.Windows.Forms.Label();
+            this.ApplySpectrometerParameters = new System.Windows.Forms.Button();
+            this.spectrometerIntegrationTimeTextBox = new System.Windows.Forms.TextBox();
+            this.integrationTimeLabel = new System.Windows.Forms.Label();
             this.LaserSettings = new System.Windows.Forms.Button();
             this.labelSpectrometer = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
@@ -64,7 +68,7 @@ namespace MicroLaman
             this.comboBoxController.Location = new System.Drawing.Point(176, 31);
             this.comboBoxController.Margin = new System.Windows.Forms.Padding(6);
             this.comboBoxController.Name = "comboBoxController";
-            this.comboBoxController.Size = new System.Drawing.Size(146, 43);
+            this.comboBoxController.Size = new System.Drawing.Size(178, 43);
             this.comboBoxController.TabIndex = 0;
             // 
             // label1
@@ -157,6 +161,10 @@ namespace MicroLaman
             // panel1
             // 
             this.panel1.BackColor = System.Drawing.Color.White;
+            this.panel1.Controls.Add(this.integrationRangeLabel);
+            this.panel1.Controls.Add(this.ApplySpectrometerParameters);
+            this.panel1.Controls.Add(this.spectrometerIntegrationTimeTextBox);
+            this.panel1.Controls.Add(this.integrationTimeLabel);
             this.panel1.Controls.Add(this.LaserSettings);
             this.panel1.Controls.Add(this.labelSpectrometer);
             this.panel1.Controls.Add(this.label2);
@@ -168,9 +176,56 @@ namespace MicroLaman
             this.panel1.Location = new System.Drawing.Point(0, 80);
             this.panel1.Margin = new System.Windows.Forms.Padding(6);
             this.panel1.Name = "panel1";
-            this.panel1.Size = new System.Drawing.Size(348, 1270);
+            this.panel1.Size = new System.Drawing.Size(402, 1270);
             this.panel1.TabIndex = 5;
-            //
+            // 
+            // integrationRangeLabel
+            // 
+            this.integrationRangeLabel.AutoSize = true;
+            this.integrationRangeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 8.5F);
+            this.integrationRangeLabel.ForeColor = System.Drawing.Color.DimGray;
+            this.integrationRangeLabel.Location = new System.Drawing.Point(20, 444);
+            this.integrationRangeLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
+            this.integrationRangeLabel.Name = "integrationRangeLabel";
+            this.integrationRangeLabel.Size = new System.Drawing.Size(266, 30);
+            this.integrationRangeLabel.TabIndex = 11;
+            this.integrationRangeLabel.Text = "可设置范围：连接后读取";
+            // 
+            // ApplySpectrometerParameters
+            // 
+            this.ApplySpectrometerParameters.Enabled = false;
+            this.ApplySpectrometerParameters.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+            this.ApplySpectrometerParameters.Location = new System.Drawing.Point(20, 380);
+            this.ApplySpectrometerParameters.Margin = new System.Windows.Forms.Padding(6);
+            this.ApplySpectrometerParameters.Name = "ApplySpectrometerParameters";
+            this.ApplySpectrometerParameters.Size = new System.Drawing.Size(314, 52);
+            this.ApplySpectrometerParameters.TabIndex = 10;
+            this.ApplySpectrometerParameters.Text = "应用参数";
+            this.ApplySpectrometerParameters.UseVisualStyleBackColor = true;
+            this.ApplySpectrometerParameters.Click += new System.EventHandler(this.ApplySpectrometerParameters_Click);
+            // 
+            // spectrometerIntegrationTimeTextBox
+            // 
+            this.spectrometerIntegrationTimeTextBox.Enabled = false;
+            this.spectrometerIntegrationTimeTextBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+            this.spectrometerIntegrationTimeTextBox.Location = new System.Drawing.Point(228, 327);
+            this.spectrometerIntegrationTimeTextBox.Margin = new System.Windows.Forms.Padding(6);
+            this.spectrometerIntegrationTimeTextBox.Name = "spectrometerIntegrationTimeTextBox";
+            this.spectrometerIntegrationTimeTextBox.Size = new System.Drawing.Size(138, 41);
+            this.spectrometerIntegrationTimeTextBox.TabIndex = 9;
+            this.spectrometerIntegrationTimeTextBox.Text = "100";
+            // 
+            // integrationTimeLabel
+            // 
+            this.integrationTimeLabel.AutoSize = true;
+            this.integrationTimeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+            this.integrationTimeLabel.Location = new System.Drawing.Point(20, 331);
+            this.integrationTimeLabel.Margin = new System.Windows.Forms.Padding(6, 0, 6, 0);
+            this.integrationTimeLabel.Name = "integrationTimeLabel";
+            this.integrationTimeLabel.Size = new System.Drawing.Size(214, 35);
+            this.integrationTimeLabel.TabIndex = 8;
+            this.integrationTimeLabel.Text = "积分时间 (ms)：";
+            // 
             // LaserSettings
             // 
             this.LaserSettings.Enabled = false;
@@ -183,9 +238,9 @@ namespace MicroLaman
             this.LaserSettings.Text = "激光器设置";
             this.LaserSettings.UseVisualStyleBackColor = true;
             this.LaserSettings.Click += new System.EventHandler(this.LaserSettings_Click);
-            //
+            // 
             // labelSpectrometer
-            //
+            // 
             this.labelSpectrometer.AutoSize = true;
             this.labelSpectrometer.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.labelSpectrometer.Location = new System.Drawing.Point(14, 129);
@@ -194,7 +249,7 @@ namespace MicroLaman
             this.labelSpectrometer.Size = new System.Drawing.Size(204, 35);
             this.labelSpectrometer.TabIndex = 7;
             this.labelSpectrometer.Text = "光谱仪：未连接";
-            //
+            // 
             // label2
             // 
             this.label2.AutoSize = true;
@@ -210,10 +265,10 @@ namespace MicroLaman
             // 
             this.formsPlot1.Dock = System.Windows.Forms.DockStyle.Top;
             this.formsPlot1.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.formsPlot1.Location = new System.Drawing.Point(348, 80);
+            this.formsPlot1.Location = new System.Drawing.Point(402, 80);
             this.formsPlot1.Margin = new System.Windows.Forms.Padding(6);
             this.formsPlot1.Name = "formsPlot1";
-            this.formsPlot1.Size = new System.Drawing.Size(1880, 700);
+            this.formsPlot1.Size = new System.Drawing.Size(1826, 700);
             this.formsPlot1.TabIndex = 6;
             // 
             // scanWorkspace
@@ -224,12 +279,12 @@ namespace MicroLaman
             this.scanWorkspace.Controls.Add(this.scanMatrixGroupBox, 0, 0);
             this.scanWorkspace.Controls.Add(this.brightFieldGroupBox, 1, 0);
             this.scanWorkspace.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.scanWorkspace.Location = new System.Drawing.Point(348, 780);
+            this.scanWorkspace.Location = new System.Drawing.Point(402, 780);
             this.scanWorkspace.Name = "scanWorkspace";
             this.scanWorkspace.Padding = new System.Windows.Forms.Padding(12);
             this.scanWorkspace.RowCount = 1;
             this.scanWorkspace.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.scanWorkspace.Size = new System.Drawing.Size(1880, 570);
+            this.scanWorkspace.Size = new System.Drawing.Size(1826, 570);
             this.scanWorkspace.TabIndex = 7;
             // 
             // scanMatrixGroupBox
@@ -239,7 +294,7 @@ namespace MicroLaman
             this.scanMatrixGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
             this.scanMatrixGroupBox.Location = new System.Drawing.Point(15, 15);
             this.scanMatrixGroupBox.Name = "scanMatrixGroupBox";
-            this.scanMatrixGroupBox.Size = new System.Drawing.Size(922, 540);
+            this.scanMatrixGroupBox.Size = new System.Drawing.Size(895, 540);
             this.scanMatrixGroupBox.TabIndex = 0;
             this.scanMatrixGroupBox.TabStop = false;
             this.scanMatrixGroupBox.Text = "扫描坐标矩阵";
@@ -250,7 +305,7 @@ namespace MicroLaman
             this.scanMatrixPreviewControl.Dock = System.Windows.Forms.DockStyle.Fill;
             this.scanMatrixPreviewControl.Location = new System.Drawing.Point(3, 34);
             this.scanMatrixPreviewControl.Name = "scanMatrixPreviewControl";
-            this.scanMatrixPreviewControl.Size = new System.Drawing.Size(916, 503);
+            this.scanMatrixPreviewControl.Size = new System.Drawing.Size(889, 503);
             this.scanMatrixPreviewControl.TabIndex = 0;
             // 
             // brightFieldGroupBox
@@ -259,9 +314,9 @@ namespace MicroLaman
             this.brightFieldGroupBox.Controls.Add(this.brightFieldPreviewPictureBox);
             this.brightFieldGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-            this.brightFieldGroupBox.Location = new System.Drawing.Point(943, 15);
+            this.brightFieldGroupBox.Location = new System.Drawing.Point(916, 15);
             this.brightFieldGroupBox.Name = "brightFieldGroupBox";
-            this.brightFieldGroupBox.Size = new System.Drawing.Size(922, 540);
+            this.brightFieldGroupBox.Size = new System.Drawing.Size(895, 540);
             this.brightFieldGroupBox.TabIndex = 1;
             this.brightFieldGroupBox.TabStop = false;
             this.brightFieldGroupBox.Text = "明场参考图";
@@ -274,22 +329,22 @@ namespace MicroLaman
             this.brightFieldPreviewStatusLabel.ForeColor = System.Drawing.Color.Gainsboro;
             this.brightFieldPreviewStatusLabel.Location = new System.Drawing.Point(3, 34);
             this.brightFieldPreviewStatusLabel.Name = "brightFieldPreviewStatusLabel";
-            this.brightFieldPreviewStatusLabel.Size = new System.Drawing.Size(916, 503);
+            this.brightFieldPreviewStatusLabel.Size = new System.Drawing.Size(889, 503);
             this.brightFieldPreviewStatusLabel.TabIndex = 1;
             this.brightFieldPreviewStatusLabel.Text = "等待检测开始";
             this.brightFieldPreviewStatusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-            //
+            // 
             // brightFieldPreviewPictureBox
-            //
+            // 
             this.brightFieldPreviewPictureBox.BackColor = System.Drawing.Color.Black;
             this.brightFieldPreviewPictureBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldPreviewPictureBox.Location = new System.Drawing.Point(3, 34);
             this.brightFieldPreviewPictureBox.Name = "brightFieldPreviewPictureBox";
-            this.brightFieldPreviewPictureBox.Size = new System.Drawing.Size(916, 503);
+            this.brightFieldPreviewPictureBox.Size = new System.Drawing.Size(889, 503);
             this.brightFieldPreviewPictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.brightFieldPreviewPictureBox.TabIndex = 0;
             this.brightFieldPreviewPictureBox.TabStop = false;
-            //
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(12F, 24F);
@@ -329,6 +384,10 @@ namespace MicroLaman
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label labelSpectrometer;
         private System.Windows.Forms.Button LaserSettings;
+        private System.Windows.Forms.Label integrationTimeLabel;
+        private System.Windows.Forms.TextBox spectrometerIntegrationTimeTextBox;
+        private System.Windows.Forms.Button ApplySpectrometerParameters;
+        private System.Windows.Forms.Label integrationRangeLabel;
         private System.Windows.Forms.TableLayoutPanel scanWorkspace;
         private System.Windows.Forms.GroupBox scanMatrixGroupBox;
         private MicroLaman.ScanMatrixPreviewControl scanMatrixPreviewControl;

@@ -84,7 +84,11 @@ namespace MicroLaman
         private double? savedCalibrationZ;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
-        private const int LaserStabilizationDelayMilliseconds = 100;
+        // 每次切换 LD 后都重新开始一次积分，避免把切换前的残留帧当成当前状态的光谱。
+        private const int SpectrometerWarmupDelayMilliseconds = 100;
+        private const int ScanPointSettlingDelayMilliseconds = 100;
+        // 等待时间由 MainForm 中已应用的积分时间计算，额外留出少量切换裕量。
+        private const int IntegrationSafetyMarginMilliseconds = 100;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -188,7 +192,10 @@ namespace MicroLaman
             CancellationToken cancellationToken,
             Action<bool> setLaserOutput,
             Action<bool> setTecOutput,
-            Action<bool> acquireSpectrum)
+            Action warmUpSpectrum,
+            Action discardSpectrum,
+            int integrationTimeMilliseconds,
+            Func<int, bool> acquireSpectrum)
         {
             if (!SerialPortManager.IsOpen)
                 throw new InvalidOperationException("请先连接 TANGO 控制器。");
@@ -200,6 +207,12 @@ namespace MicroLaman
                 throw new ArgumentNullException(nameof(setLaserOutput));
             if (setTecOutput == null)
                 throw new ArgumentNullException(nameof(setTecOutput));
+            if (warmUpSpectrum == null)
+                throw new ArgumentNullException(nameof(warmUpSpectrum));
+            if (discardSpectrum == null)
+                throw new ArgumentNullException(nameof(discardSpectrum));
+            if (integrationTimeMilliseconds <= 0)
+                throw new ArgumentOutOfRangeException(nameof(integrationTimeMilliseconds));
             if (acquireSpectrum == null)
                 throw new ArgumentNullException(nameof(acquireSpectrum));
             if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
@@ -225,6 +238,9 @@ namespace MicroLaman
                 setLaserOutput(false);
                 // TEC 在整段扫描期间保持开启，必须在第一次平台移动前启动。
                 setTecOutput(true);
+                progress.Report("光谱仪预热中…");
+                warmUpSpectrum();
+                WaitForScanDelay(SpectrometerWarmupDelayMilliseconds, cancellationToken);
                 camera.PrepareForNewScan();
 
                 for (int index = 0; index < normalizedPoints.Count; index++)
@@ -243,23 +259,31 @@ namespace MicroLaman
                     progress.Report(string.Format("扫描 {0}/{1}", index + 1, normalizedPoints.Count));
                     MoveToAndVerify(target, savedDimensions);
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+                    WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
-                    cancellationToken.ThrowIfCancellationRequested();
-                    progress.Report(string.Format("关激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
-                    acquireSpectrum(false);
-
+                    // 每个点只保留开激光原始谱：移动稳定后开 LD，等待 LD 稳定，再读取一次光谱。
+                    // 不读取、不显示、也不保存关激光背景谱，避免两种状态的积分帧相互混淆。
                     setLaserOutput(true);
                     try
                     {
-                        WaitForScanDelay(LaserStabilizationDelayMilliseconds, cancellationToken);
+                        int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
+                        WaitForScanDelay(completeIntegrationDelay, cancellationToken);
+                        if (index == 0)
+                        {
+                            // 首帧只用于让 GODZILLA 清掉启动前的积分缓存，不更新图表和点位数据。
+                            progress.Report("首点光谱仪稳定中…");
+                            discardSpectrum();
+                            WaitForScanDelay(completeIntegrationDelay, cancellationToken);
+                        }
                         progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
-                        acquireSpectrum(true);
-                        camera.RecordScanVisit(normalized);
+                        acquireSpectrum(index);
                     }
                     finally
                     {
                         setLaserOutput(false);
                     }
+
+                    camera.RecordScanVisit(normalized);
                 }
             }
             finally
