@@ -144,6 +144,9 @@
     <Compile Include="LaserSettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DarkSpectrumPromptForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="StageScanController.cs" />
     <Compile Include="TUCamNative.cs" />
     <Compile Include="SerialPortManager.cs" />

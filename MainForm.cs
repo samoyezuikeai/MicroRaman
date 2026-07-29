@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
-<<<<<<< HEAD
 using System.Globalization;
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
 using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +19,8 @@ namespace MicroLaman
         private LaserSettingsForm laserSettingsForm;
         private CancellationTokenSource scanCancellation;
         private CancellationTokenSource calibrationCancellation;
+        private CancellationTokenSource realtimeSpectrumCancellation;
+        private Task realtimeSpectrumTask;
         private DateTime scanStartedUtc = DateTime.MinValue;
         private static readonly TimeSpan ScanDoubleClickGuard = TimeSpan.FromMilliseconds(800);
         // GODZILLA 配套示例的界面默认值为 100 ms；用户可在主窗口中修改并应用。
@@ -31,16 +30,17 @@ namespace MicroLaman
         private readonly object spectrometerDeviceSync = new object();
         private Terra.Device laserDevice;
         private Terra.Device spectrometerDevice;
-<<<<<<< HEAD
         private double spectrometerIntegrationTimeMilliseconds = DefaultSpectrometerIntegrationTimeMilliseconds;
         private double spectrometerMinimumIntegrationTimeMilliseconds;
         private double spectrometerMaximumIntegrationTimeMilliseconds;
         private readonly object savedSpectrumSync = new object();
         private readonly Dictionary<int, RamanSpectrum> laserOnSpectra =
             new Dictionary<int, RamanSpectrum>();
-=======
-        private double[] laserOffSpectrum;
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
+        private readonly object darkSpectrumSync = new object();
+        // 手动“采集暗谱”保存的背景用于实时光谱；扫描时每个点单独采集背景，不复用这里的数据。
+        private double[] savedDarkSpectrum;
+        private readonly Dictionary<int, double[]> scanDarkSpectra =
+            new Dictionary<int, double[]>();
         private bool laserEnabled;
         private bool tecEnabled;
 
@@ -63,13 +63,9 @@ namespace MicroLaman
         public MainForm()
         {
             InitializeComponent();
-<<<<<<< HEAD
             spectrometerIntegrationTimeTextBox.Text = FormatIntegrationTime(DefaultSpectrometerIntegrationTimeMilliseconds);
             InitializeSpectrumPlot();
             scanMatrixPreviewControl.ScanPointSelected += ScanMatrixPreviewControl_ScanPointSelected;
-=======
-            InitializeSpectrumPlot();
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
@@ -77,6 +73,7 @@ namespace MicroLaman
             Resize += MainForm_Resize;
             LayoutBrightFieldPreviewArea();
             RefreshComList();
+            UpdateRealtimeSpectrumButtonState();
         }
 
         /// <summary>
@@ -180,7 +177,6 @@ namespace MicroLaman
                     if (!connectedSpectrometer.isUsbConnected())
                         throw new InvalidOperationException("GODZILLA 光谱仪 USB 尚未连接。");
 
-<<<<<<< HEAD
                     double minimumIntegrationTime = connectedSpectrometer.getMinIntegrationTime();
                     double maximumIntegrationTime = connectedSpectrometer.getMaxIntegrationTime();
                     if (minimumIntegrationTime <= 0 || maximumIntegrationTime < minimumIntegrationTime)
@@ -191,20 +187,13 @@ namespace MicroLaman
                         minimumIntegrationTime,
                         maximumIntegrationTime);
                     connectedSpectrometer.setIntegrationTime(requestedIntegrationTime);
-=======
-                    // 连接阶段只确认设备并安全关闭激光器，不修改光谱仪的采集参数。
-                    // 保留光谱仪当前已验证可用的积分时间与平均次数。
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                     connectedLaser.setLDOff();
                     connectedLaser.setTECOff();
                     laserDevice = connectedLaser;
                     spectrometerDevice = connectedSpectrometer;
-<<<<<<< HEAD
                     spectrometerMinimumIntegrationTimeMilliseconds = minimumIntegrationTime;
                     spectrometerMaximumIntegrationTimeMilliseconds = maximumIntegrationTime;
                     spectrometerIntegrationTimeMilliseconds = requestedIntegrationTime;
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                     laserEnabled = false;
                     tecEnabled = false;
                 }
@@ -230,16 +219,13 @@ namespace MicroLaman
         /// </summary>
         private void LaserSettings_Click(object sender, EventArgs e)
         {
-            if (laserDevice == null)
-                return;
+            if (laserDevice == null) return;
 
             if (laserSettingsForm == null || laserSettingsForm.IsDisposed)
             {
                 Terra.Device device;
-                lock (laserDeviceSync)
-                    device = laserDevice;
-                if (device == null)
-                    return;
+                lock (laserDeviceSync) device = laserDevice;
+                if (device == null) return;
 
                 laserSettingsForm = new LaserSettingsForm(
                     device,
@@ -314,13 +300,8 @@ namespace MicroLaman
                 settings.SetTecOutputStateFromScan(enabled);
         }
 
-<<<<<<< HEAD
-        /// <summary>在 LD 已打开且稳定后采集、显示并保存一张开激光原始拉曼谱。</summary>
+        /// <summary>在 LD 已打开且稳定后采集、扣除当前点暗谱并保存结果。</summary>
         private bool AcquireSpectrumForScan(int scanIndex)
-=======
-        /// <summary>同步采集当前光谱；开激光后使用同一点的关激光光谱扣除背景。</summary>
-        private void AcquireSpectrumForScan(bool laserOn)
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         {
             double[] wavelengths;
             double[] intensities;
@@ -332,11 +313,7 @@ namespace MicroLaman
                     throw new InvalidOperationException("光谱仪连接已断开，扫描已安全停止。");
 
                 // 采集在扫描工作线程中完成；本次光谱有效返回前平台不会继续移动。
-<<<<<<< HEAD
                 intensities = AcquireStableSpectrum(device);
-=======
-                intensities = AcquireValidSpectrum(device);
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                 wavelengths = device.getWavelengths();
                 excitationWavelength = device.getLaserWavelength();
                 if (excitationWavelength <= 0)
@@ -353,43 +330,21 @@ namespace MicroLaman
                 throw new InvalidOperationException(
                     "Terra SDK 未提供有效的激发波长，无法计算拉曼位移。请先在设备参数中设置实际激光波长。");
 
-<<<<<<< HEAD
+            double[] darkSpectrum = GetScanDarkSpectrum(scanIndex, intensities.Length);
+            double[] correctedIntensities = SubtractDarkSpectrumAndSmooth(intensities, darkSpectrum);
             RamanSpectrum laserOnSpectrum = CreateRamanSpectrum(
-                wavelengths, (double[])intensities.Clone(), excitationWavelength);
+                wavelengths, correctedIntensities, excitationWavelength);
             SaveLaserOnSpectrum(scanIndex, laserOnSpectrum);
             ShowSpectrum(
                 laserOnSpectrum.RamanShifts,
                 laserOnSpectrum.Intensities,
-                "开激光原始拉曼谱");
+                "开激光拉曼谱（已扣除当前点暗谱）");
             MarkScanPointSpectrumAvailable(scanIndex);
             return true;
         }
 
         private static double[] AcquireStableSpectrum(Terra.Device device)
         {
-=======
-            double[] acquired = (double[])intensities.Clone();
-            if (!laserOn)
-            {
-                laserOffSpectrum = acquired;
-                ShowProcessedRamanSpectrum(wavelengths, acquired, excitationWavelength, "激光关闭背景谱");
-                return;
-            }
-
-            if (laserOffSpectrum == null || laserOffSpectrum.Length != acquired.Length)
-                throw new InvalidOperationException("当前扫描点缺少匹配的关激光背景光谱，扫描已安全停止。");
-
-            double[] corrected = new double[acquired.Length];
-            for (int index = 0; index < corrected.Length; index++)
-                corrected[index] = acquired[index] - laserOffSpectrum[index];
-            laserOffSpectrum = null;
-            ShowProcessedRamanSpectrum(wavelengths, corrected, excitationWavelength, "背景扣除拉曼谱");
-        }
-
-        private static double[] AcquireValidSpectrum(Terra.Device device)
-        {
-            // 恢复此前实际采集成功的直接读取方式：连续读取三次，不重置积分状态。
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 double[] spectrum = device.getSpectrum();
@@ -397,21 +352,103 @@ namespace MicroLaman
                     return spectrum;
             }
 
-<<<<<<< HEAD
             throw new InvalidOperationException(
                 "光谱仪未返回有效光谱，扫描已安全停止。请重新插拔光谱仪USB或者重启程序。");
         }
 
-        /// <summary>丢弃一张启动残留光谱，不更新图表，也不写入任何扫描点。</summary>
+        /// <summary>在当前平台点、LD 关闭状态下采集暗谱，供紧随其后的开激光读谱扣除。</summary>
+        private void CaptureDarkSpectrumForScan(int scanIndex)
+        {
+            double[] intensities = ReadCurrentSpectrumIntensities("扫描暗谱");
+            lock (darkSpectrumSync)
+            {
+                scanDarkSpectra[scanIndex] = (double[])intensities.Clone();
+            }
+        }
+
+        /// <summary>清除首个开激光积分切换时可能残留的缓存帧，不显示也不保存。</summary>
         private void DiscardSpectrumForScan()
+        {
+            ReadCurrentSpectrumIntensities("首点过渡光谱");
+        }
+
+        /// <summary>读取一张原始强度帧，不改变连接、激光或积分时间设置。</summary>
+        private double[] ReadCurrentSpectrumIntensities(string operationName)
         {
             lock (spectrometerDeviceSync)
             {
                 Terra.Device device = spectrometerDevice;
                 if (device == null || !device.isUsbConnected())
-                    throw new InvalidOperationException("光谱仪连接已断开，无法稳定首点采集。");
+                    throw new InvalidOperationException("光谱仪连接已断开，无法采集" + operationName + "。 ");
 
-                AcquireStableSpectrum(device);
+                return (double[])AcquireStableSpectrum(device).Clone();
+            }
+        }
+
+        private double[] GetScanDarkSpectrum(int scanIndex, int expectedLength)
+        {
+            lock (darkSpectrumSync)
+            {
+                double[] darkSpectrum;
+                if (!scanDarkSpectra.TryGetValue(scanIndex, out darkSpectrum))
+                    throw new InvalidOperationException("当前扫描点未采集到暗谱，无法进行背景扣除。");
+                if (darkSpectrum.Length != expectedLength)
+                    throw new InvalidOperationException("当前扫描点的暗谱长度与开激光光谱不一致，无法进行背景扣除。");
+                return (double[])darkSpectrum.Clone();
+            }
+        }
+
+        private static double[] SubtractDarkSpectrumAndSmooth(double[] signal, double[] darkSpectrum)
+        {
+            if (signal == null || darkSpectrum == null || signal.Length != darkSpectrum.Length)
+                throw new InvalidOperationException("光谱与暗谱数据不匹配，无法进行背景扣除。");
+
+            double[] corrected = new double[signal.Length];
+            for (int index = 0; index < corrected.Length; index++)
+                corrected[index] = signal[index] - darkSpectrum[index];
+            return SmoothMovingAverage(corrected, 5);
+        }
+
+        private static double[] SmoothMovingAverage(double[] values, int windowSize)
+        {
+            double[] smoothed = new double[values.Length];
+            int halfWindow = windowSize / 2;
+            for (int index = 0; index < values.Length; index++)
+            {
+                int start = Math.Max(0, index - halfWindow);
+                int end = Math.Min(values.Length - 1, index + halfWindow);
+                double total = 0;
+                for (int sample = start; sample <= end; sample++)
+                    total += values[sample];
+                smoothed[index] = total / (end - start + 1);
+            }
+            return smoothed;
+        }
+
+        private bool HasSavedDarkSpectrum()
+        {
+            lock (darkSpectrumSync)
+                return savedDarkSpectrum != null && savedDarkSpectrum.Length > 1;
+        }
+
+        private double[] GetSavedDarkSpectrum(int expectedLength)
+        {
+            lock (darkSpectrumSync)
+            {
+                if (savedDarkSpectrum == null || savedDarkSpectrum.Length == 0)
+                    throw new InvalidOperationException("需要先采集暗谱再进行展示。");
+                if (savedDarkSpectrum.Length != expectedLength)
+                    throw new InvalidOperationException("保存的暗谱与当前光谱长度不一致，请重新采集暗谱。");
+                return (double[])savedDarkSpectrum.Clone();
+            }
+        }
+
+        private void SaveCurrentDarkSpectrum()
+        {
+            double[] intensities = ReadCurrentSpectrumIntensities("暗谱");
+            lock (darkSpectrumSync)
+            {
+                savedDarkSpectrum = (double[])intensities.Clone();
             }
         }
 
@@ -434,16 +471,6 @@ namespace MicroLaman
             double[] wavelengths,
             double[] intensities,
             double excitationWavelength)
-=======
-            throw new InvalidOperationException("光谱仪未返回有效光谱，扫描已安全停止。请检查积分时间设置。");
-        }
-
-        private void ShowProcessedRamanSpectrum(
-            double[] wavelengths,
-            double[] intensities,
-            double excitationWavelength,
-            string title)
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         {
             List<double> shifts = new List<double>();
             List<double> values = new List<double>();
@@ -467,7 +494,6 @@ namespace MicroLaman
             double[] x = shifts.ToArray();
             double[] y = values.ToArray();
             Array.Sort(x, y);
-<<<<<<< HEAD
             return new RamanSpectrum(x, y);
         }
 
@@ -511,19 +537,13 @@ namespace MicroLaman
                 spectrum.RamanShifts,
                 spectrum.Intensities,
                 string.Format("第 {0} 点开激光原始拉曼谱", e.ScanIndex + 1));
-=======
-            ShowSpectrum(x, y, title);
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         }
 
         private void InitializeSpectrumPlot()
         {
             const string plotFont = "Microsoft YaHei UI";
             ScottPlot.Fonts.Default = plotFont;
-<<<<<<< HEAD
             formsPlot1.Plot.Clear();
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             formsPlot1.Plot.Title("等待光谱采集");
             formsPlot1.Plot.XLabel("拉曼位移 (cm⁻¹)");
             formsPlot1.Plot.YLabel("强度");
@@ -551,15 +571,208 @@ namespace MicroLaman
             ScottPlot.Plottables.Scatter spectrum = formsPlot1.Plot.Add.Scatter(ramanShifts, intensities);
             spectrum.MarkerSize = 0;
             spectrum.LineWidth = 1.5F;
-<<<<<<< HEAD
             spectrum.Color = ScottPlot.Colors.Red;
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             formsPlot1.Plot.Title(title);
             formsPlot1.Plot.XLabel("拉曼位移(cm⁻¹)");
             formsPlot1.Plot.YLabel("强度");
             formsPlot1.Plot.Axes.AutoScale();
             formsPlot1.Refresh();
+        }
+
+        /// <summary>切换实时读取模式；首次启动会在专用提示窗口中采集暗谱。</summary>
+        private async void RealtimeSpectrum_Click(object sender, EventArgs e)
+        {
+            if (realtimeSpectrumCancellation != null)
+            {
+                await StopRealtimeSpectrumAsync(true);
+                return;
+            }
+
+            if (spectrometerDevice == null)
+            {
+                MessageBox.Show(this, "请先连接光谱仪。", "实时光谱",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (scanCancellation != null || calibrationCancellation != null)
+                return;
+
+            if (!HasSavedDarkSpectrum())
+            {
+                using (DarkSpectrumPromptForm prompt = new DarkSpectrumPromptForm())
+                {
+                    if (prompt.ShowDialog(this) != DialogResult.OK)
+                        return;
+                }
+
+                try
+                {
+                    SetLaserOutputForScan(false);
+                    RealtimeSpectrum.Enabled = false;
+                    await Task.Run(() => SaveCurrentDarkSpectrum());
+                    // 暗谱完成后，为实时调试恢复激发光：先 TEC，后 LD。
+                    SetTecOutputForScan(true);
+                    SetLaserOutputForScan(true);
+                    await Task.Delay(GetSpectrometerIntegrationTimeMillisecondsForScan() + 100);
+                    MessageBox.Show(this,
+                        "采集暗谱成功，激光器自动打开，实时光谱如图所示。",
+                        "实时光谱", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, ex.Message, "实时光谱",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    UpdateRealtimeSpectrumButtonState();
+                    return;
+                }
+            }
+
+            CancellationTokenSource cancellation = new CancellationTokenSource();
+            realtimeSpectrumCancellation = cancellation;
+            RealtimeSpectrum.Text = "停止实时光谱";
+            RealtimeSpectrum.ToolTipText = "停止实时读取并清空波形图";
+            RealtimeSpectrum.Enabled = true;
+            realtimeSpectrumTask = Task.Run(() => RunRealtimeSpectrumLoop(cancellation), cancellation.Token);
+        }
+
+        /// <summary>持续显示当前光谱仪的暗谱扣除结果，不写入扫描矩阵或点位存档。</summary>
+        private void RunRealtimeSpectrumLoop(CancellationTokenSource cancellation)
+        {
+            CancellationToken token = cancellation.Token;
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    RamanSpectrum spectrum = ReadRealtimeSpectrum();
+                    if (token.IsCancellationRequested || IsDisposed || Disposing)
+                        return;
+
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (realtimeSpectrumCancellation == cancellation)
+                        {
+                            ShowSpectrum(
+                                spectrum.RamanShifts,
+                                spectrum.Intensities,
+                                "实时光谱");
+                        }
+                    }));
+
+                    if (token.WaitHandle.WaitOne(30))
+                        return;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!token.IsCancellationRequested && !IsDisposed && !Disposing)
+                {
+                    BeginInvoke(new Action(() => HandleRealtimeSpectrumError(cancellation, ex)));
+                }
+            }
+        }
+
+        /// <summary>在光谱仪锁内读取一帧，并转换为用于实时显示的拉曼坐标。</summary>
+        private RamanSpectrum ReadRealtimeSpectrum()
+        {
+            double[] wavelengths;
+            double[] intensities;
+            double excitationWavelength;
+            lock (spectrometerDeviceSync)
+            {
+                Terra.Device device = spectrometerDevice;
+                if (device == null || !device.isUsbConnected())
+                    throw new InvalidOperationException("光谱仪连接已断开，无法继续实时采谱。");
+
+                intensities = AcquireStableSpectrum(device);
+                wavelengths = device.getWavelengths();
+                excitationWavelength = device.getLaserWavelength();
+                if (excitationWavelength <= 0)
+                    excitationWavelength = device.excitedWaveLength;
+            }
+
+            if (wavelengths == null || intensities == null || wavelengths.Length != intensities.Length)
+                throw new InvalidOperationException("光谱仪返回的波长与强度数据长度不一致。");
+            if (excitationWavelength <= 0)
+                throw new InvalidOperationException("光谱仪未返回有效的激发波长。");
+            double[] darkSpectrum = GetSavedDarkSpectrum(intensities.Length);
+            double[] correctedIntensities = SubtractDarkSpectrumAndSmooth(intensities, darkSpectrum);
+            return CreateRamanSpectrum(wavelengths, correctedIntensities, excitationWavelength);
+        }
+
+        /// <summary>实时读取异常时恢复工具栏按钮，防止它停留在“停止”状态。</summary>
+        private void HandleRealtimeSpectrumError(CancellationTokenSource cancellation, Exception error)
+        {
+            if (realtimeSpectrumCancellation != cancellation)
+                return;
+
+            realtimeSpectrumCancellation = null;
+            realtimeSpectrumTask = null;
+            cancellation.Dispose();
+            TurnOffLaserAndTecAfterRealtime();
+            UpdateRealtimeSpectrumButtonState();
+            MessageBox.Show(this, error.Message, "实时光谱", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        /// <summary>停止实时读取；停止当前 SDK 读谱以便立即释放光谱仪锁。</summary>
+        private async Task StopRealtimeSpectrumAsync(bool clearPlot)
+        {
+            CancellationTokenSource cancellation = realtimeSpectrumCancellation;
+            Task runningTask = realtimeSpectrumTask;
+            realtimeSpectrumCancellation = null;
+            realtimeSpectrumTask = null;
+
+            if (cancellation != null)
+            {
+                cancellation.Cancel();
+                Terra.Device device = spectrometerDevice;
+                if (device != null)
+                {
+                    try { device.stopSpectrum(); } catch { }
+                }
+
+                if (runningTask != null)
+                {
+                    try { await runningTask; }
+                    catch (OperationCanceledException) { }
+                }
+                cancellation.Dispose();
+                TurnOffLaserAndTecAfterRealtime();
+            }
+
+            if (clearPlot && !IsDisposed && !Disposing)
+                InitializeSpectrumPlot();
+            UpdateRealtimeSpectrumButtonState();
+        }
+
+        /// <summary>实时模式停止或异常退出后，按 LD、TEC 的安全顺序关闭激光器。</summary>
+        private void TurnOffLaserAndTecAfterRealtime()
+        {
+            if (laserDevice == null)
+                return;
+
+            try { SetLaserOutputForScan(false); }
+            catch { }
+            try { SetTecOutputForScan(false); }
+            catch { }
+        }
+
+        /// <summary>连接前、扫描/定标期间禁用；实时显示中保留按钮以允许用户停止。</summary>
+        private void UpdateRealtimeSpectrumButtonState()
+        {
+            bool isRunning = realtimeSpectrumCancellation != null;
+            if (isRunning)
+            {
+                RealtimeSpectrum.Text = "停止实时光谱";
+                RealtimeSpectrum.ToolTipText = "停止实时读取并清空波形图";
+                RealtimeSpectrum.Enabled = true;
+                return;
+            }
+
+            RealtimeSpectrum.Text = "实时光谱";
+            RealtimeSpectrum.ToolTipText = "开始实时读取当前光谱仪的光谱";
+            RealtimeSpectrum.Enabled = spectrometerDevice != null
+                && scanCancellation == null
+                && calibrationCancellation == null;
         }
 
         /// <summary>窗口缩放时为下方参考图区保留可见空间。</summary>
@@ -630,10 +843,8 @@ namespace MicroLaman
             label2.Text = laserDevice == null ? "激光器：未连接" : "激光器：已连接";
             labelSpectrometer.Text = spectrometerDevice == null ? "光谱仪：未连接" : "光谱仪：已连接";
             LaserSettings.Enabled = laserDevice != null;
-<<<<<<< HEAD
             UpdateSpectrometerIntegrationControls();
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
+            UpdateRealtimeSpectrumButtonState();
             if (laserSettingsForm != null && !laserSettingsForm.IsDisposed)
                 laserSettingsForm.RefreshDeviceState();
         }
@@ -770,14 +981,14 @@ namespace MicroLaman
             lock (spectrometerDeviceSync)
             {
                 spectrometerDevice = null;
-<<<<<<< HEAD
             }
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
-=======
-                laserOffSpectrum = null;
+            lock (darkSpectrumSync)
+            {
+                savedDarkSpectrum = null;
+                scanDarkSpectra.Clear();
             }
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
 
             lock (laserDeviceSync)
             {
@@ -801,6 +1012,8 @@ namespace MicroLaman
         {
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
+            lock (darkSpectrumSync)
+                scanDarkSpectra.Clear();
             scanMatrixPreviewControl.ClearSpectrumAvailability();
             InitializeSpectrumPlot();
         }
@@ -872,12 +1085,16 @@ namespace MicroLaman
                     MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
+            if (realtimeSpectrumCancellation != null)
+                await StopRealtimeSpectrumAsync(true);
+
             calibrationCancellation = new CancellationTokenSource();
             CancellationToken token = calibrationCancellation.Token;
             cameraShowForm.HideSelectionOverlayForCalibration();
             CalibrateStage.Enabled = false;
                 ScanSelection.Enabled = false;
             SetLaserControlsEnabled(false);
+            UpdateRealtimeSpectrumButtonState();
             IProgress<string> progress = new Progress<string>(text => CalibrateStage.Text = text);
             try
             {
@@ -914,6 +1131,7 @@ namespace MicroLaman
                 CalibrateStage.Enabled = true;
                 ScanSelection.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
+                UpdateRealtimeSpectrumButtonState();
             }
         }
 
@@ -983,6 +1201,8 @@ namespace MicroLaman
             }
 
             // 即使框选区域未改变，新一轮蛇形扫描也不能复用上一轮的点位光谱。
+            if (realtimeSpectrumCancellation != null)
+                await StopRealtimeSpectrumAsync(true);
             ClearSavedScanSpectra();
 
             scanStartedUtc = DateTime.UtcNow;
@@ -991,6 +1211,7 @@ namespace MicroLaman
             ScanSelection.Text = "扫描中…";
             CalibrateStage.Enabled = false;
             SetLaserControlsEnabled(false);
+            UpdateRealtimeSpectrumButtonState();
             IProgress<string> progress = new Progress<string>(text => ScanSelection.Text = text);
             try
             {
@@ -1002,12 +1223,10 @@ namespace MicroLaman
                         token,
                         SetLaserOutputForScan,
                         SetTecOutputForScan,
-<<<<<<< HEAD
                         WarmUpSpectrometerForScan,
+                        CaptureDarkSpectrumForScan,
                         DiscardSpectrumForScan,
                         GetSpectrometerIntegrationTimeMillisecondsForScan(),
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                         AcquireSpectrumForScan),
                     token);
                 MessageBox.Show(this,
@@ -1034,6 +1253,7 @@ namespace MicroLaman
                 ScanSelection.Text = "蛇形扫描";
                 CalibrateStage.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
+                UpdateRealtimeSpectrumButtonState();
             }
         }
 
@@ -1046,6 +1266,8 @@ namespace MicroLaman
                 scanCancellation.Cancel();
             if (calibrationCancellation != null)
                 calibrationCancellation.Cancel();
+            if (realtimeSpectrumCancellation != null)
+                realtimeSpectrumCancellation.Cancel();
             Image preview = brightFieldPreviewPictureBox.Image;
             brightFieldPreviewPictureBox.Image = null;
             if (preview != null)

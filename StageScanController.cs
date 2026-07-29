@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
@@ -84,15 +84,11 @@ namespace MicroLaman
         private double? savedCalibrationZ;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
-<<<<<<< HEAD
         // 每次切换 LD 后都重新开始一次积分，避免把切换前的残留帧当成当前状态的光谱。
         private const int SpectrometerWarmupDelayMilliseconds = 100;
         private const int ScanPointSettlingDelayMilliseconds = 100;
         // 等待时间由 MainForm 中已应用的积分时间计算，额外留出少量切换裕量。
         private const int IntegrationSafetyMarginMilliseconds = 100;
-=======
-        private const int LaserStabilizationDelayMilliseconds = 100;
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -196,14 +192,11 @@ namespace MicroLaman
             CancellationToken cancellationToken,
             Action<bool> setLaserOutput,
             Action<bool> setTecOutput,
-<<<<<<< HEAD
             Action warmUpSpectrum,
+            Action<int> captureDarkSpectrum,
             Action discardSpectrum,
             int integrationTimeMilliseconds,
             Func<int, bool> acquireSpectrum)
-=======
-            Action<bool> acquireSpectrum)
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
         {
             if (!SerialPortManager.IsOpen)
                 throw new InvalidOperationException("请先连接 TANGO 控制器。");
@@ -215,15 +208,14 @@ namespace MicroLaman
                 throw new ArgumentNullException(nameof(setLaserOutput));
             if (setTecOutput == null)
                 throw new ArgumentNullException(nameof(setTecOutput));
-<<<<<<< HEAD
             if (warmUpSpectrum == null)
                 throw new ArgumentNullException(nameof(warmUpSpectrum));
+            if (captureDarkSpectrum == null)
+                throw new ArgumentNullException(nameof(captureDarkSpectrum));
             if (discardSpectrum == null)
                 throw new ArgumentNullException(nameof(discardSpectrum));
             if (integrationTimeMilliseconds <= 0)
                 throw new ArgumentOutOfRangeException(nameof(integrationTimeMilliseconds));
-=======
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
             if (acquireSpectrum == null)
                 throw new ArgumentNullException(nameof(acquireSpectrum));
             if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
@@ -272,36 +264,27 @@ namespace MicroLaman
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
                     WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
-<<<<<<< HEAD
-                    // 每个点只保留开激光原始谱：移动稳定后开 LD，等待 LD 稳定，再读取一次光谱。
-                    // 不读取、不显示、也不保存关激光背景谱，避免两种状态的积分帧相互混淆。
+                    // 每个点都在当前位置独立采集暗谱：移动稳定后、打开 LD 前等待一个积分周期并读取。
+                    // 紧随其后的开激光读谱会在 MainForm 中扣除这张同位置暗谱。
+                    int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
+                    progress.Report(string.Format("采集暗谱 {0}/{1}", index + 1, normalizedPoints.Count));
+                    WaitForScanDelay(completeIntegrationDelay, cancellationToken);
+                    captureDarkSpectrum(index);
+
                     setLaserOutput(true);
                     try
                     {
-                        int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
                         WaitForScanDelay(completeIntegrationDelay, cancellationToken);
                         if (index == 0)
                         {
-                            // 首帧只用于让 GODZILLA 清掉启动前的积分缓存，不更新图表和点位数据。
-                            progress.Report("首点光谱仪稳定中…");
+                            // 首次由关 LD 切到开 LD 时，设备可能先吐出切换前已经在缓存中的帧。
+                            // 仅丢弃这一张过渡帧，再等待一个完整积分周期后才保存第 1 点。
+                            progress.Report("首点开激光稳定中…");
                             discardSpectrum();
                             WaitForScanDelay(completeIntegrationDelay, cancellationToken);
                         }
                         progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         acquireSpectrum(index);
-=======
-                    cancellationToken.ThrowIfCancellationRequested();
-                    progress.Report(string.Format("关激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
-                    acquireSpectrum(false);
-
-                    setLaserOutput(true);
-                    try
-                    {
-                        WaitForScanDelay(LaserStabilizationDelayMilliseconds, cancellationToken);
-                        progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
-                        acquireSpectrum(true);
-                        camera.RecordScanVisit(normalized);
->>>>>>> 6da2ef264141979a59235eab4f35384806706a06
                     }
                     finally
                     {
