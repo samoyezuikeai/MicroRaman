@@ -147,6 +147,14 @@
     <Compile Include="DarkSpectrumPromptForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="RamanMappingAnalyzer.cs" />
+    <Compile Include="LabSpecPeakMappingAnalyzer.cs" />
+    <Compile Include="PcaMappingAnalyzer.cs" />
+    <Compile Include="FullSpectrumDifferenceMappingAnalyzer.cs" />
+    <Compile Include="RamanMappingOptionsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ToolbarIconFactory.cs" />
     <Compile Include="StageScanController.cs" />
     <Compile Include="TUCamNative.cs" />
     <Compile Include="SerialPortManager.cs" />

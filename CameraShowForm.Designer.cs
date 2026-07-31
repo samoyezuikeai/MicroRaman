@@ -234,7 +234,7 @@
             this.xPointCountNumeric.Location = new System.Drawing.Point(1400, 24);
             this.xPointCountNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.xPointCountNumeric.Minimum = new decimal(new int[] {
-            1,
+            2,
             0,
             0,
             0});
@@ -264,7 +264,7 @@
             this.yPointCountNumeric.Location = new System.Drawing.Point(1524, 24);
             this.yPointCountNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.yPointCountNumeric.Minimum = new decimal(new int[] {
-            1,
+            2,
             0,
             0,
             0});

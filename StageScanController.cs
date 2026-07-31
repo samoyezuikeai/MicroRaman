@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
 
@@ -84,14 +85,13 @@ namespace MicroLaman
         private double? savedCalibrationZ;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
-        // 每次切换 LD 后都重新开始一次积分，避免把切换前的残留帧当成当前状态的光谱。
-        private const int SpectrometerWarmupDelayMilliseconds = 100;
         private const int ScanPointSettlingDelayMilliseconds = 100;
-        // 状态切换后等待完整积分并留出少量通信裕量，确保取到当前 LD 状态的帧。
-        private const int IntegrationSafetyMarginMilliseconds = 100;
-        // 短积分（例如 100 ms）时，LD 输出与光谱仪帧切换仍需要额外稳定时间。
-        // 小于此值会把尚未建立的亮帧误当成有效拉曼谱；达到该积分时间后不再附加 LD 延迟。
-        private const int MinimumLaserOnSettlingDelayMilliseconds = 500;
+        private const int LaserTecWarmupDelayMilliseconds = 5000;
+        private const int LaserOffBeforeMoveDelayMilliseconds = 100;
+        // 必须在亮谱积分开始前等待 LD 输出稳定；积分时间本身不能代替这段预稳定时间。
+        private const int LaserOnSettlingDelayMilliseconds = 300;
+        // 换行点在采暗谱期间 LD 关闭更久，重新开启后需要更长时间恢复稳定输出。
+        private const int LaserOnSettlingAfterDarkDelayMilliseconds = 800;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -195,9 +195,8 @@ namespace MicroLaman
             CancellationToken cancellationToken,
             Action<bool> setLaserOutput,
             Action<bool> setTecOutput,
-            Action warmUpSpectrum,
+            Action<CancellationToken> warmUpSpectrum,
             Action captureDarkSpectrum,
-            Action discardSpectrum,
             int integrationTimeMilliseconds,
             Func<int, bool> acquireSpectrum)
         {
@@ -215,8 +214,6 @@ namespace MicroLaman
                 throw new ArgumentNullException(nameof(warmUpSpectrum));
             if (captureDarkSpectrum == null)
                 throw new ArgumentNullException(nameof(captureDarkSpectrum));
-            if (discardSpectrum == null)
-                throw new ArgumentNullException(nameof(discardSpectrum));
             if (integrationTimeMilliseconds <= 0)
                 throw new ArgumentOutOfRangeException(nameof(integrationTimeMilliseconds));
             if (acquireSpectrum == null)
@@ -244,21 +241,16 @@ namespace MicroLaman
                 setLaserOutput(false);
                 // TEC 在整段扫描期间保持开启，必须在第一次平台移动前启动。
                 setTecOutput(true);
-                progress.Report("光谱仪预热中…");
-                warmUpSpectrum();
-                WaitForScanDelay(SpectrometerWarmupDelayMilliseconds, cancellationToken);
-                // Raman mapping 的暗谱代表探测器/光路背景；每张 map 开始时采一张即可。
-                // 先清除启动前缓存，再等待完整积分，避免把上一次采集残留写入背景。
-                int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
-                progress.Report("采集扫描暗谱…");
-                discardSpectrum();
-                WaitForScanDelay(completeIntegrationDelay, cancellationToken);
-                captureDarkSpectrum();
+                progress.Report("激光器 TEC 稳定中…");
+                WaitForScanDelay(LaserTecWarmupDelayMilliseconds, cancellationToken);
+                progress.Report("光谱仪温控稳定中…");
+                warmUpSpectrum(cancellationToken);
                 camera.PrepareForNewScan();
 
                 for (int index = 0; index < normalizedPoints.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    Stopwatch pointTimer = Stopwatch.StartNew();
                     PointF normalized = normalizedPoints[index];
                     PointF imagePoint = new PointF(
                         normalized.X * savedImageWidth,
@@ -274,26 +266,54 @@ namespace MicroLaman
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
                     WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
-                    // 每个点只采一张开激光谱；全局暗谱已在扫描开始时采集。
-                    // 开 LD 后仍丢掉一张关 LD 缓存帧，保证亮谱来自当前点、当前 LD 状态。
+                    bool enteredNewRow = index > 0
+                        && Math.Abs(normalized.Y - normalizedPoints[index - 1].Y) > 0.000001f;
+                    // 每一行只使用一张暗谱：第一点以及蛇形路径换行后的第一个点更新，
+                    // 行内不再按时间切换背景基准，避免同一行出现人为的强度跳变。
+                    bool refreshDarkSpectrum = index == 0 || enteredNewRow;
+                    long darkAcquisitionMilliseconds = 0;
+                    if (refreshDarkSpectrum)
+                    {
+                        progress.Report(string.Format("更新暗谱 {0}/{1}", index + 1, normalizedPoints.Count));
+                        Stopwatch darkTimer = Stopwatch.StartNew();
+                        captureDarkSpectrum();
+                        darkTimer.Stop();
+                        darkAcquisitionMilliseconds = darkTimer.ElapsedMilliseconds;
+                    }
+
                     setLaserOutput(true);
+                    Stopwatch brightTimer = Stopwatch.StartNew();
                     try
                     {
                         progress.Report(string.Format("开激光稳定中 {0}/{1}", index + 1, normalizedPoints.Count));
-                        discardSpectrum();
-                        int laserOnDelay = integrationTimeMilliseconds < MinimumLaserOnSettlingDelayMilliseconds
-                            ? MinimumLaserOnSettlingDelayMilliseconds
-                            : integrationTimeMilliseconds;
-                        WaitForScanDelay(laserOnDelay, cancellationToken);
+                        WaitForScanDelay(
+                            refreshDarkSpectrum
+                                ? LaserOnSettlingAfterDarkDelayMilliseconds
+                                : LaserOnSettlingDelayMilliseconds,
+                            cancellationToken);
                         progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         acquireSpectrum(index);
                     }
                     finally
                     {
+                        brightTimer.Stop();
                         setLaserOutput(false);
                     }
 
+                    // LD 完全关闭后再允许平台开始下一次移动。
+                    WaitForScanDelay(LaserOffBeforeMoveDelayMilliseconds, cancellationToken);
+
                     camera.RecordScanVisit(normalized);
+                    pointTimer.Stop();
+                    progress.Report(string.Format(
+                        "完成 {0}/{1}（暗谱 {2}，亮谱及稳定 {3} ms，本点 {4} ms）",
+                        index + 1,
+                        normalizedPoints.Count,
+                        refreshDarkSpectrum
+                            ? darkAcquisitionMilliseconds + " ms"
+                            : "复用",
+                        brightTimer.ElapsedMilliseconds,
+                        pointTimer.ElapsedMilliseconds));
                 }
             }
             finally
@@ -302,6 +322,7 @@ namespace MicroLaman
                 {
                     // 无论正常结束、停止还是异常，移动平台前都再次强制关闭 LD。
                     setLaserOutput(false);
+                    Thread.Sleep(LaserOffBeforeMoveDelayMilliseconds);
                 }
                 finally
                 {

@@ -21,6 +21,7 @@ namespace MicroLaman
         private string statusText = "等待检测开始";
         private readonly List<ScanPoint> scanPoints = new List<ScanPoint>();
         private readonly HashSet<int> spectrumAvailableIndexes = new HashSet<int>();
+        private readonly Dictionary<int, Color> mappingColors = new Dictionary<int, Color>();
         private int hoveredScanIndex = -1;
         private int selectedScanIndex = -1;
 
@@ -56,6 +57,7 @@ namespace MicroLaman
             rowCount = rows.Count;
             scanPoints.Clear();
             spectrumAvailableIndexes.Clear();
+            mappingColors.Clear();
             hoveredScanIndex = -1;
             selectedScanIndex = -1;
             for (int index = 0; index < points.Count; index++)
@@ -84,6 +86,7 @@ namespace MicroLaman
             rowCount = 0;
             scanPoints.Clear();
             spectrumAvailableIndexes.Clear();
+            mappingColors.Clear();
             hoveredScanIndex = -1;
             selectedScanIndex = -1;
             statusText = text;
@@ -99,13 +102,52 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>批量标记后台扫描刚完成的点，只触发一次重绘。</summary>
+        internal void SetSpectraAvailable(IEnumerable<int> scanIndexes)
+        {
+            if (scanIndexes == null)
+                return;
+            bool changed = false;
+            foreach (int scanIndex in scanIndexes)
+            {
+                if (scanIndex >= 0 && scanIndex < scanPoints.Count)
+                    changed |= spectrumAvailableIndexes.Add(scanIndex);
+            }
+            if (changed)
+                Invalidate();
+        }
+
         /// <summary>保留当前网格，但清除上一轮扫描的已保存光谱和选中状态。</summary>
         internal void ClearSpectrumAvailability()
         {
             spectrumAvailableIndexes.Clear();
+            mappingColors.Clear();
             hoveredScanIndex = -1;
             selectedScanIndex = -1;
             Cursor = Cursors.Default;
+            Invalidate();
+        }
+
+        /// <summary>显示每个扫描点的拉曼 Mapping 伪彩色；颜色区域由相邻点中心的中点分隔。</summary>
+        internal void SetMappingColors(IDictionary<int, Color> colors)
+        {
+            mappingColors.Clear();
+            if (colors != null)
+            {
+                foreach (KeyValuePair<int, Color> pair in colors)
+                {
+                    if (pair.Key >= 0 && pair.Key < scanPoints.Count)
+                        mappingColors[pair.Key] = pair.Value;
+                }
+            }
+            Invalidate();
+        }
+
+        internal void ClearMappingColors()
+        {
+            if (mappingColors.Count == 0)
+                return;
+            mappingColors.Clear();
             Invalidate();
         }
 
@@ -122,6 +164,8 @@ namespace MicroLaman
             Rectangle gridBounds;
             if (!TryGetGridBounds(out gridBounds))
                 return;
+
+            DrawMappingCells(e.Graphics, gridBounds);
 
             using (Pen border = new Pen(Color.DeepSkyBlue, 2f))
             using (Pen grid = new Pen(Color.FromArgb(110, Color.Gray), 1f))
@@ -144,14 +188,27 @@ namespace MicroLaman
                     bool selected = scanPoint.ScanIndex == selectedScanIndex;
                     bool hovered = scanPoint.ScanIndex == hoveredScanIndex;
                     bool available = spectrumAvailableIndexes.Contains(scanPoint.ScanIndex);
-                    float radius = selected || hovered ? 5.5f : available ? 4.5f : 2.5f;
                     Color color = selected ? Color.RoyalBlue
                         : hovered ? Color.Gold
                         : available ? Color.ForestGreen
                         : Color.Red;
                     using (Brush point = new SolidBrush(color))
-                        e.Graphics.FillEllipse(point, pointLocation.X - radius, pointLocation.Y - radius,
-                            radius * 2, radius * 2);
+                    {
+                        if (!selected && !hovered)
+                        {
+                            // 普通红点和绿色点绘制为 2×2 像素，清晰可见且不遮挡 Mapping 色块。
+                            e.Graphics.FillRectangle(point,
+                                (int)Math.Round(pointLocation.X) - 1,
+                                (int)Math.Round(pointLocation.Y) - 1, 2, 2);
+                        }
+                        else
+                        {
+                            // 仅悬停或选中时临时放大；HitTest 仍保留 9 像素点击范围。
+                            float radius = selected ? 2.5f : 2f;
+                            e.Graphics.FillEllipse(point, pointLocation.X - radius, pointLocation.Y - radius,
+                                radius * 2, radius * 2);
+                        }
+                    }
                 }
             }
 
@@ -161,6 +218,59 @@ namespace MicroLaman
             TextRenderer.DrawText(e.Graphics, "Y (mm)", Font,
                 new Rectangle(2, gridBounds.Top - 2, Math.Max(1, gridBounds.Left - 6), 22), Color.Black,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        private void DrawMappingCells(Graphics graphics, Rectangle gridBounds)
+        {
+            if (mappingColors.Count == 0)
+                return;
+
+            foreach (ScanPoint scanPoint in scanPoints)
+            {
+                Color color;
+                if (!mappingColors.TryGetValue(scanPoint.ScanIndex, out color))
+                    continue;
+                RectangleF cellBounds = GetMappingCellBounds(gridBounds, scanPoint);
+                using (Brush brush = new SolidBrush(color))
+                    graphics.FillRectangle(brush, cellBounds);
+            }
+        }
+
+        /// <summary>
+        /// 点的颜色延伸到相邻点连线的中点：内部点覆盖四个相邻大格子的各四分之一，
+        /// 边缘点则裁剪到框选矩形边界。
+        /// </summary>
+        private RectangleF GetMappingCellBounds(Rectangle gridBounds, ScanPoint scanPoint)
+        {
+            float centerX = GetColumnCenter(gridBounds, scanPoint.Column);
+            float centerY = GetRowCenter(gridBounds, scanPoint.Row);
+            float left = scanPoint.Column == 0
+                ? gridBounds.Left
+                : (GetColumnCenter(gridBounds, scanPoint.Column - 1) + centerX) / 2f;
+            float right = scanPoint.Column == columnCount - 1
+                ? gridBounds.Right
+                : (centerX + GetColumnCenter(gridBounds, scanPoint.Column + 1)) / 2f;
+            float top = scanPoint.Row == 0
+                ? gridBounds.Top
+                : (GetRowCenter(gridBounds, scanPoint.Row - 1) + centerY) / 2f;
+            float bottom = scanPoint.Row == rowCount - 1
+                ? gridBounds.Bottom
+                : (centerY + GetRowCenter(gridBounds, scanPoint.Row + 1)) / 2f;
+            return RectangleF.FromLTRB(left, top, right, bottom);
+        }
+
+        private float GetColumnCenter(Rectangle gridBounds, int column)
+        {
+            return columnCount == 1
+                ? gridBounds.Left + gridBounds.Width / 2f
+                : gridBounds.Left + gridBounds.Width * column / (float)(columnCount - 1);
+        }
+
+        private float GetRowCenter(Rectangle gridBounds, int row)
+        {
+            return rowCount == 1
+                ? gridBounds.Top + gridBounds.Height / 2f
+                : gridBounds.Top + gridBounds.Height * row / (float)(rowCount - 1);
         }
 
         private static void AddDistinct(List<float> values, float value)
@@ -204,13 +314,9 @@ namespace MicroLaman
 
         private PointF GetPointLocation(Rectangle gridBounds, ScanPoint scanPoint)
         {
-            float x = columnCount == 1
-                ? gridBounds.Left + gridBounds.Width / 2f
-                : gridBounds.Left + gridBounds.Width * scanPoint.Column / (float)(columnCount - 1);
-            float y = rowCount == 1
-                ? gridBounds.Top + gridBounds.Height / 2f
-                : gridBounds.Top + gridBounds.Height * scanPoint.Row / (float)(rowCount - 1);
-            return new PointF(x, y);
+            return new PointF(
+                GetColumnCenter(gridBounds, scanPoint.Column),
+                GetRowCenter(gridBounds, scanPoint.Row));
         }
 
         protected override void OnMouseMove(MouseEventArgs e)

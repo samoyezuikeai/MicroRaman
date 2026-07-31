@@ -33,11 +33,21 @@ namespace MicroLaman
         private double spectrometerIntegrationTimeMilliseconds = DefaultSpectrometerIntegrationTimeMilliseconds;
         private double spectrometerMinimumIntegrationTimeMilliseconds;
         private double spectrometerMaximumIntegrationTimeMilliseconds;
+        private bool spectrometerCoolingStarted;
         private readonly object savedSpectrumSync = new object();
         private readonly Dictionary<int, RamanSpectrum> laserOnSpectra =
             new Dictionary<int, RamanSpectrum>();
+        private readonly object scanSpectrumUiSync = new object();
+        private readonly HashSet<int> pendingScanSpectrumIndexes = new HashSet<int>();
+        private RamanSpectrum pendingScanSpectrum;
+        private int pendingScanSpectrumIndex = -1;
+        private int pendingScanSpectrumVersion;
+        private bool scanSpectrumUiUpdateScheduled;
+        private int completedScanPointCount;
+        private int spectrumDataVersion;
+        private bool mappingCalculationRunning;
         private readonly object darkSpectrumSync = new object();
-        // 手动“采集暗谱”保存的背景用于实时光谱；扫描使用每轮开始时单独采集的全局暗谱。
+        // 手动保存的背景只用于实时光谱；蛇形扫描在每一行开始时刷新暗谱以跟踪温漂。
         private double[] savedDarkSpectrum;
         private double[] scanDarkSpectrum;
         private bool laserEnabled;
@@ -62,6 +72,7 @@ namespace MicroLaman
         public MainForm()
         {
             InitializeComponent();
+            InitializeToolbarIcons();
             spectrometerIntegrationTimeTextBox.Text = FormatIntegrationTime(DefaultSpectrometerIntegrationTimeMilliseconds);
             InitializeSpectrumPlot();
             scanMatrixPreviewControl.ScanPointSelected += ScanMatrixPreviewControl_ScanPointSelected;
@@ -73,6 +84,23 @@ namespace MicroLaman
             LayoutBrightFieldPreviewArea();
             RefreshComList();
             UpdateRealtimeSpectrumButtonState();
+            UpdateRamanMappingButtonState();
+        }
+
+        /// <summary>为实时光谱和 Raman Mapping 按钮应用与现有工具栏一致的图标布局。</summary>
+        private void InitializeToolbarIcons()
+        {
+            RealtimeSpectrum.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            RealtimeSpectrum.Image = ToolbarIconFactory.CreateRealtimeSpectrumIcon();
+            RealtimeSpectrum.ImageTransparentColor = Color.Transparent;
+            RealtimeSpectrum.Margin = new Padding(2, 0, 2, 0);
+            RealtimeSpectrum.Size = new Size(56, 56);
+
+            RamanMapping.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            RamanMapping.Image = ToolbarIconFactory.CreateRamanMappingIcon();
+            RamanMapping.ImageTransparentColor = Color.Transparent;
+            RamanMapping.Margin = new Padding(2, 0, 2, 0);
+            RamanMapping.Size = new Size(56, 56);
         }
 
         /// <summary>
@@ -193,6 +221,9 @@ namespace MicroLaman
                     spectrometerMaximumIntegrationTimeMilliseconds = maximumIntegrationTime;
                     // 与左侧“应用参数”使用同一套 SDK 范围校验和写入逻辑。
                     ApplySpectrometerIntegrationTime(requestedIntegrationTime);
+                    ConfigureSpectrometerAcquisition(connectedSpectrometer);
+                    // 支持探测器 TEC 的光谱仪从连接后即开始制冷，减少正式 Mapping 前的等待和暗电流漂移。
+                    spectrometerCoolingStarted = TryStartSpectrometerCooling(connectedSpectrometer);
                     laserEnabled = false;
                     tecEnabled = false;
                 }
@@ -299,7 +330,7 @@ namespace MicroLaman
                 settings.SetTecOutputStateFromScan(enabled);
         }
 
-        /// <summary>在 LD 已打开且稳定后采集、扣除当前点暗谱并保存结果。</summary>
+        /// <summary>在 LD 已打开且稳定后采集、扣除最近一次扫描暗谱并保存结果。</summary>
         private bool AcquireSpectrumForScan(int scanIndex)
         {
             double[] wavelengths;
@@ -312,7 +343,7 @@ namespace MicroLaman
                     throw new InvalidOperationException("光谱仪连接已断开，扫描已安全停止。");
 
                 // 采集在扫描工作线程中完成；本次光谱有效返回前平台不会继续移动。
-                intensities = AcquireStableSpectrum(device);
+                intensities = AcquireFreshSpectrum(device);
                 wavelengths = device.getWavelengths();
                 excitationWavelength = device.getLaserWavelength();
                 if (excitationWavelength <= 0)
@@ -334,12 +365,29 @@ namespace MicroLaman
             RamanSpectrum laserOnSpectrum = CreateRamanSpectrum(
                 wavelengths, correctedIntensities, excitationWavelength);
             SaveLaserOnSpectrum(scanIndex, laserOnSpectrum);
-            ShowSpectrum(
-                laserOnSpectrum.RamanShifts,
-                laserOnSpectrum.Intensities,
-                "开激光拉曼谱（已扣除扫描暗谱）");
-            MarkScanPointSpectrumAvailable(scanIndex);
+            QueueScanSpectrumUiUpdate(scanIndex, laserOnSpectrum);
             return true;
+        }
+
+        /// <summary>
+        /// 强制从当前 LD 状态重新开始一次积分，避免读取到开关切换前的缓存帧。
+        /// 不支持 reset 采集的设备会停止旧积分后回退到普通同步采谱。
+        /// </summary>
+        private static double[] AcquireFreshSpectrum(Terra.Device device)
+        {
+            try
+            {
+                double[] resetSpectrum = device.getResetSpectrum();
+                if (resetSpectrum != null && resetSpectrum.Length > 1)
+                    return resetSpectrum;
+            }
+            catch
+            {
+                // 部分旧固件没有实现 reset 采集，下面使用 stop + getSpectrum 兼容。
+            }
+
+            try { device.stopSpectrum(); } catch { }
+            return AcquireStableSpectrum(device);
         }
 
         private static double[] AcquireStableSpectrum(Terra.Device device)
@@ -355,20 +403,21 @@ namespace MicroLaman
                 "光谱仪未返回有效光谱，扫描已安全停止。请重新插拔光谱仪USB或者重启程序。");
         }
 
-        /// <summary>扫描开始时在 LD 关闭状态采集一张全局暗谱，供整张 Raman map 扣除。</summary>
+        /// <summary>在 LD 关闭状态强制采集一张新暗谱，供随后短时间内的亮谱扣除。</summary>
         private void CaptureDarkSpectrumForScan()
         {
-            double[] intensities = ReadCurrentSpectrumIntensities("扫描暗谱");
+            double[] intensities;
+            lock (spectrometerDeviceSync)
+            {
+                Terra.Device device = spectrometerDevice;
+                if (device == null || !device.isUsbConnected())
+                    throw new InvalidOperationException("光谱仪连接已断开，无法采集当前点暗谱。");
+                intensities = AcquireFreshSpectrum(device);
+            }
             lock (darkSpectrumSync)
             {
                 scanDarkSpectrum = (double[])intensities.Clone();
             }
-        }
-
-        /// <summary>读取并丢弃状态切换前缓存的光谱帧，不显示也不保存。</summary>
-        private void DiscardSpectrumForScan()
-        {
-            ReadCurrentSpectrumIntensities("状态切换缓存光谱");
         }
 
         /// <summary>读取一张原始强度帧，不改变连接、激光或积分时间设置。</summary>
@@ -404,7 +453,9 @@ namespace MicroLaman
             double[] corrected = new double[signal.Length];
             for (int index = 0; index < corrected.Length; index++)
                 corrected[index] = signal[index] - darkSpectrum[index];
-            return SmoothMovingAverage(corrected, 5);
+            double[] smoothed = SmoothMovingAverage(corrected, 5);
+            // 与商业 Raman 软件的处理顺序一致：暗谱扣除后再消除缓慢变化的荧光/暗电流基线。
+            return RamanMappingAnalyzer.RemoveBaseline(smoothed);
         }
 
         private static double[] SmoothMovingAverage(double[] values, int windowSize)
@@ -451,10 +502,12 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 扫描开始前停止此前残留的积分。正常扫描期间不额外预读光谱，避免改变第一点的数据。
+        /// 扫描开始前停止此前残留的积分；若当前型号确实返回了有效 CCD TEC 状态，则等待其稳定。
+        /// 不支持 CCD TEC 的型号会直接跳过，不能仅依赖 SDK 的 isSupportCCDTEC（该版本会固定返回 true）。
         /// </summary>
-        private void WarmUpSpectrometerForScan()
+        private void WarmUpSpectrometerForScan(CancellationToken cancellationToken)
         {
+            bool waitForCooling;
             lock (spectrometerDeviceSync)
             {
                 Terra.Device device = spectrometerDevice;
@@ -462,6 +515,49 @@ namespace MicroLaman
                     throw new InvalidOperationException("光谱仪连接已断开，无法预热采谱。");
 
                 try { device.stopSpectrum(); } catch { }
+                waitForCooling = spectrometerCoolingStarted;
+            }
+
+            if (!waitForCooling)
+                return;
+
+            // 制冷已在连接时启动，这里最多再等 10 秒；每点配对暗谱仍会补偿剩余的小幅暗电流变化。
+            DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                byte coolingState;
+                lock (spectrometerDeviceSync)
+                {
+                    Terra.Device device = spectrometerDevice;
+                    if (device == null || !device.isUsbConnected())
+                        throw new InvalidOperationException("光谱仪连接已断开，无法检查温控状态。");
+
+                    byte[] state;
+                    try { state = device.getCCDTECState(); }
+                    catch
+                    {
+                        spectrometerCoolingStarted = false;
+                        return;
+                    }
+                    if (state == null || state.Length <= 11 || state[11] > 2)
+                    {
+                        spectrometerCoolingStarted = false;
+                        return;
+                    }
+                    coolingState = state[11];
+                }
+
+                if (coolingState == 1)
+                    return;
+                // 2 表示 TEC 关闭：视为该硬件未实际接受温控命令，不阻塞扫描。
+                if (coolingState == 2)
+                {
+                    spectrometerCoolingStarted = false;
+                    return;
+                }
+                if (cancellationToken.WaitHandle.WaitOne(250))
+                    cancellationToken.ThrowIfCancellationRequested();
             }
         }
 
@@ -506,19 +602,75 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>在扫描矩阵中标记已保存开激光光谱的点。</summary>
-        private void MarkScanPointSpectrumAvailable(int scanIndex)
+        /// <summary>
+        /// 扫描线程只投递数据，不等待 ScottPlot 和矩阵重绘；这样 LD 会在硬件读谱完成后立即关闭。
+        /// 多个尚未处理的点合并成一次 UI 更新，但所有点仍会被标记为可回看。
+        /// </summary>
+        private void QueueScanSpectrumUiUpdate(int scanIndex, RamanSpectrum spectrum)
         {
             if (IsDisposed || Disposing)
                 return;
-            if (InvokeRequired)
+
+            bool scheduleUpdate = false;
+            lock (scanSpectrumUiSync)
             {
-                try { Invoke(new Action<int>(MarkScanPointSpectrumAvailable), scanIndex); }
-                catch (InvalidOperationException) { }
-                return;
+                pendingScanSpectrumIndexes.Add(scanIndex);
+                pendingScanSpectrum = spectrum;
+                pendingScanSpectrumIndex = scanIndex;
+                pendingScanSpectrumVersion = spectrumDataVersion;
+                if (!scanSpectrumUiUpdateScheduled)
+                {
+                    scanSpectrumUiUpdateScheduled = true;
+                    scheduleUpdate = true;
+                }
             }
 
-            scanMatrixPreviewControl.SetSpectrumAvailable(scanIndex);
+            if (!scheduleUpdate)
+                return;
+            try { BeginInvoke(new Action(ProcessPendingScanSpectrumUiUpdate)); }
+            catch (InvalidOperationException)
+            {
+                lock (scanSpectrumUiSync)
+                    scanSpectrumUiUpdateScheduled = false;
+            }
+        }
+
+        private void ProcessPendingScanSpectrumUiUpdate()
+        {
+            List<int> availableIndexes;
+            RamanSpectrum spectrum;
+            int scanIndex;
+            int dataVersion;
+            lock (scanSpectrumUiSync)
+            {
+                availableIndexes = new List<int>(pendingScanSpectrumIndexes);
+                pendingScanSpectrumIndexes.Clear();
+                spectrum = pendingScanSpectrum;
+                scanIndex = pendingScanSpectrumIndex;
+                dataVersion = pendingScanSpectrumVersion;
+                pendingScanSpectrum = null;
+                pendingScanSpectrumIndex = -1;
+                scanSpectrumUiUpdateScheduled = false;
+            }
+
+            if (dataVersion != spectrumDataVersion || spectrum == null)
+                return;
+            scanMatrixPreviewControl.SetSpectraAvailable(availableIndexes);
+            ShowSpectrum(
+                spectrum.RamanShifts,
+                spectrum.Intensities,
+                string.Format("第 {0} 点开激光拉曼谱（已扣除最近暗谱）", scanIndex + 1));
+        }
+
+        private void ClearPendingScanSpectrumUiUpdates()
+        {
+            lock (scanSpectrumUiSync)
+            {
+                pendingScanSpectrumIndexes.Clear();
+                pendingScanSpectrum = null;
+                pendingScanSpectrumIndex = -1;
+                pendingScanSpectrumVersion = spectrumDataVersion;
+            }
         }
 
         /// <summary>点击矩阵点后显示该点的开激光后拉曼光谱。</summary>
@@ -535,6 +687,154 @@ namespace MicroLaman
                 spectrum.RamanShifts,
                 spectrum.Intensities,
                 string.Format("第 {0} 点开激光原始拉曼谱", e.ScanIndex + 1));
+        }
+
+        /// <summary>扫描全部成功完成后，按左侧选择的光谱指标生成 Mapping 伪彩图。</summary>
+        private async void RamanMapping_Click(object sender, EventArgs e)
+        {
+            List<RamanMappingSpectrum> spectra = CreateRamanMappingSnapshot();
+            if (spectra == null)
+            {
+                MessageBox.Show(this, "请先完整完成一次蛇形扫描。", "拉曼 Mapping",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateRamanMappingButtonState();
+                return;
+            }
+
+            RamanMappingMode mappingMode = GetSelectedMappingMode();
+            double targetShift = 960.0;
+            double halfWidth = 20.0;
+            double referenceShift = double.NaN;
+            double referenceHalfWidth = double.NaN;
+            if (mappingMode != RamanMappingMode.Pca)
+            {
+                try
+                {
+                    AutoDetectedRamanPeak detectedPeak =
+                        LabSpecPeakMappingAnalyzer.DetectTargetPeakParameters(spectra);
+                    targetShift = detectedPeak.Center;
+                    halfWidth = detectedPeak.HalfWidth;
+                    referenceShift = detectedPeak.ReferenceCenter;
+                    referenceHalfWidth = detectedPeak.ReferenceHalfWidth;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, ex.Message, "拉曼 Mapping 失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+
+            int dataVersion = spectrumDataVersion;
+            mappingCalculationRunning = true;
+            RamanMapping.Enabled = false;
+            RamanMapping.Text = "计算中…";
+            try
+            {
+                IDictionary<int, Color> colors;
+                string mappingTitle;
+                if (mappingMode == RamanMappingMode.Automatic && halfWidth >= 55.0)
+                {
+                    FullSpectrumDifferenceMappingResult result = await Task.Run(() =>
+                        FullSpectrumDifferenceMappingAnalyzer.Analyze(spectra));
+                    colors = result.Colors;
+                    mappingTitle =
+                        "拉曼 Mapping（自动判断：未发现可靠窄峰，显示荧光/全谱差异）";
+                }
+                else if (mappingMode == RamanMappingMode.Pca)
+                {
+                    PcaMappingResult result = await Task.Run(() =>
+                        PcaMappingAnalyzer.Analyze(spectra));
+                    colors = result.Colors;
+                    mappingTitle = string.Format(
+                        "拉曼 Mapping（PCA 全谱异常，{0} 个主成分；背景蓝，异常区域黄/红）",
+                        result.ComponentCount);
+                }
+                else
+                {
+                    RamanMappingMode effectiveMode = mappingMode == RamanMappingMode.Automatic
+                        ? RamanMappingMode.PeakArea
+                        : mappingMode;
+                    LabSpecPeakMappingResult result = await Task.Run(() =>
+                        LabSpecPeakMappingAnalyzer.Analyze(
+                            spectra, targetShift, halfWidth,
+                            referenceShift, referenceHalfWidth, effectiveMode));
+                    colors = result.Colors;
+                    mappingTitle = string.Format(
+                        "拉曼 Mapping（{0}峰 {1:F1}±{2:F1} cm⁻¹，{3}{4}）",
+                        mappingMode == RamanMappingMode.Automatic ? "自动判断：" : "自动",
+                        result.TargetShift,
+                        result.HalfWidth,
+                        result.MetricDisplayName,
+                        result.UsedReferenceNormalization
+                            ? string.Format(" / {0:F1} cm⁻¹ 自动参考峰", result.ReferenceShift)
+                            : " / 未使用参考峰");
+                }
+                if (dataVersion != spectrumDataVersion || IsDisposed || Disposing)
+                    return;
+
+                scanMatrixPreviewControl.SetMappingColors(colors);
+                scanMatrixGroupBox.Text = mappingTitle;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "拉曼 Mapping 失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                mappingCalculationRunning = false;
+                RamanMapping.Text = "拉曼 Mapping";
+                UpdateRamanMappingButtonState();
+            }
+        }
+
+        private RamanMappingMode GetSelectedMappingMode()
+        {
+            if (mappingAutomaticRadioButton.Checked) return RamanMappingMode.Automatic;
+            if (mappingPeakHeightRadioButton.Checked) return RamanMappingMode.PeakHeight;
+            if (mappingPeakPositionRadioButton.Checked) return RamanMappingMode.PeakPosition;
+            if (mappingPeakWidthRadioButton.Checked) return RamanMappingMode.PeakWidth;
+            if (mappingPcaRadioButton.Checked) return RamanMappingMode.Pca;
+            return RamanMappingMode.PeakArea;
+        }
+
+        /// <summary>复制一份完整扫描数据，使后台计算期间不持有采集数据锁。</summary>
+        private List<RamanMappingSpectrum> CreateRamanMappingSnapshot()
+        {
+            lock (savedSpectrumSync)
+            {
+                if (completedScanPointCount < 2 || laserOnSpectra.Count != completedScanPointCount)
+                    return null;
+
+                List<RamanMappingSpectrum> spectra =
+                    new List<RamanMappingSpectrum>(completedScanPointCount);
+                for (int scanIndex = 0; scanIndex < completedScanPointCount; scanIndex++)
+                {
+                    RamanSpectrum spectrum;
+                    if (!laserOnSpectra.TryGetValue(scanIndex, out spectrum))
+                        return null;
+                    spectra.Add(new RamanMappingSpectrum(
+                        scanIndex,
+                        (double[])spectrum.RamanShifts.Clone(),
+                        (double[])spectrum.Intensities.Clone()));
+                }
+                return spectra;
+            }
+        }
+
+        /// <summary>仅当本轮蛇形扫描完整结束且每个点都有光谱时允许生成 Mapping。</summary>
+        private void UpdateRamanMappingButtonState()
+        {
+            int savedSpectrumCount;
+            lock (savedSpectrumSync)
+                savedSpectrumCount = laserOnSpectra.Count;
+
+            RamanMapping.Enabled = !mappingCalculationRunning
+                && scanCancellation == null
+                && calibrationCancellation == null
+                && completedScanPointCount >= 2
+                && savedSpectrumCount == completedScanPointCount;
         }
 
         private void InitializeSpectrumPlot()
@@ -843,6 +1143,12 @@ namespace MicroLaman
             LaserSettings.Enabled = laserDevice != null;
             UpdateSpectrometerIntegrationControls();
             UpdateRealtimeSpectrumButtonState();
+            if (completedScanPointCount == 0)
+            {
+                scanMatrixPreviewControl.ClearMappingColors();
+                scanMatrixGroupBox.Text = "扫描坐标矩阵";
+            }
+            UpdateRamanMappingButtonState();
             if (laserSettingsForm != null && !laserSettingsForm.IsDisposed)
                 laserSettingsForm.RefreshDeviceState();
         }
@@ -902,10 +1208,49 @@ namespace MicroLaman
                         FormatIntegrationTime(maximum)));
                 }
 
+                // Terra SDK 的 getIntegrationTime() 在部分设备上会返回旧值，不能用于连接阶段的强制校验。
+                // 保持原有已验证可用的写入方式，并由后续 getResetSpectrum() 按该参数重新开始积分。
                 device.setIntegrationTime(requestedIntegrationTime);
+                try { device.clearFrameBuffer(); } catch { }
                 spectrometerMinimumIntegrationTimeMilliseconds = minimum;
                 spectrometerMaximumIntegrationTimeMilliseconds = maximum;
                 spectrometerIntegrationTimeMilliseconds = requestedIntegrationTime;
+            }
+        }
+
+        /// <summary>按 Terra 官方 GODP 示例固定为自由触发、单次平均、单帧缓存，避免历史设置残留。</summary>
+        private static void ConfigureSpectrometerAcquisition(Terra.Device device)
+        {
+            if (device == null)
+                return;
+            try { device.stopSpectrum(); } catch { }
+            try { device.setTriggerMode(0); } catch { }
+            try { device.setScansToAverage(1); } catch { }
+            try { device.setFrameBufferNumber(1); } catch { }
+            try { device.clearFrameBuffer(); } catch { }
+        }
+
+        /// <summary>
+        /// 仅在设备能读回有效 CCD TEC 状态时启动光谱仪制冷；避免 SDK 固定返回支持而误操作无 TEC 型号。
+        /// </summary>
+        private static bool TryStartSpectrometerCooling(Terra.Device device)
+        {
+            if (device == null)
+                return false;
+            try
+            {
+                if (!device.isSupportCCDTEC())
+                    return false;
+                byte[] state = device.getCCDTECState();
+                if (state == null || state.Length <= 11 || state[11] > 2)
+                    return false;
+                bool powerStarted = device.setCCDTECPowerOn();
+                bool coolingEnabled = device.setCCDTECEnable();
+                return powerStarted && coolingEnabled;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -978,10 +1323,23 @@ namespace MicroLaman
 
             lock (spectrometerDeviceSync)
             {
+                if (spectrometerDevice != null)
+                {
+                    try
+                    {
+                        if (spectrometerDevice.isSupportCCDTEC())
+                            spectrometerDevice.setCCDTECPowerOff();
+                    }
+                    catch { }
+                }
                 spectrometerDevice = null;
+                spectrometerCoolingStarted = false;
             }
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
+            completedScanPointCount = 0;
+            spectrumDataVersion++;
+            ClearPendingScanSpectrumUiUpdates();
             lock (darkSpectrumSync)
             {
                 savedDarkSpectrum = null;
@@ -1010,10 +1368,16 @@ namespace MicroLaman
         {
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
+            completedScanPointCount = 0;
+            spectrumDataVersion++;
+            ClearPendingScanSpectrumUiUpdates();
             lock (darkSpectrumSync)
                 scanDarkSpectrum = null;
             scanMatrixPreviewControl.ClearSpectrumAvailability();
+            scanMatrixPreviewControl.ClearMappingColors();
+            scanMatrixGroupBox.Text = "扫描坐标矩阵";
             InitializeSpectrumPlot();
+            UpdateRamanMappingButtonState();
         }
 
         /// <summary>
@@ -1093,6 +1457,7 @@ namespace MicroLaman
                 ScanSelection.Enabled = false;
             SetLaserControlsEnabled(false);
             UpdateRealtimeSpectrumButtonState();
+            UpdateRamanMappingButtonState();
             IProgress<string> progress = new Progress<string>(text => CalibrateStage.Text = text);
             try
             {
@@ -1130,6 +1495,7 @@ namespace MicroLaman
                 ScanSelection.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
                 UpdateRealtimeSpectrumButtonState();
+                UpdateRamanMappingButtonState();
             }
         }
 
@@ -1210,6 +1576,7 @@ namespace MicroLaman
             CalibrateStage.Enabled = false;
             SetLaserControlsEnabled(false);
             UpdateRealtimeSpectrumButtonState();
+            UpdateRamanMappingButtonState();
             IProgress<string> progress = new Progress<string>(text => ScanSelection.Text = text);
             try
             {
@@ -1223,10 +1590,10 @@ namespace MicroLaman
                         SetTecOutputForScan,
                         WarmUpSpectrometerForScan,
                         CaptureDarkSpectrumForScan,
-                        DiscardSpectrumForScan,
                         GetSpectrometerIntegrationTimeMillisecondsForScan(),
                         AcquireSpectrumForScan),
                     token);
+                completedScanPointCount = scanPoints.Count;
                 MessageBox.Show(this,
                     string.Format("已完成 {0} 个网格点的蛇形遍历。", scanPoints.Count),
                     "蛇形扫描",
@@ -1252,6 +1619,7 @@ namespace MicroLaman
                 CalibrateStage.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
                 UpdateRealtimeSpectrumButtonState();
+                UpdateRamanMappingButtonState();
             }
         }
 

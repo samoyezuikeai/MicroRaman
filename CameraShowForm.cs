@@ -807,6 +807,11 @@ namespace MicroLaman
 
             int xPointCount = (int)xPointCountNumeric.Value;
             int yPointCount = (int)yPointCountNumeric.Value;
+            if (xPointCount < 2 || yPointCount < 2)
+            {
+                errorMessage = "X、Y 方向的扫描点数都不得少于 2（最小矩阵为 2×2）。";
+                return false;
+            }
             for (int row = 0; row < yPointCount; row++)
             {
                 for (int step = 0; step < xPointCount; step++)
