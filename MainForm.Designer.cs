@@ -43,6 +43,8 @@ namespace MicroLaman
             this.panel1 = new System.Windows.Forms.Panel();
             this.mappingReferenceGroupBox = new System.Windows.Forms.GroupBox();
             this.mappingAutomaticRadioButton = new System.Windows.Forms.RadioButton();
+            this.mappingFullSpectrumRadioButton = new System.Windows.Forms.RadioButton();
+            this.mappingReferenceHintLabel = new System.Windows.Forms.Label();
             this.mappingPcaRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingPeakWidthRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingPeakPositionRadioButton = new System.Windows.Forms.RadioButton();
@@ -221,6 +223,8 @@ namespace MicroLaman
             // mappingReferenceGroupBox
             //
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPcaRadioButton);
+            this.mappingReferenceGroupBox.Controls.Add(this.mappingFullSpectrumRadioButton);
+            this.mappingReferenceGroupBox.Controls.Add(this.mappingReferenceHintLabel);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakWidthRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakPositionRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakAreaRadioButton);
@@ -229,7 +233,7 @@ namespace MicroLaman
             this.mappingReferenceGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
             this.mappingReferenceGroupBox.Location = new System.Drawing.Point(20, 494);
             this.mappingReferenceGroupBox.Name = "mappingReferenceGroupBox";
-            this.mappingReferenceGroupBox.Size = new System.Drawing.Size(346, 334);
+            this.mappingReferenceGroupBox.Size = new System.Drawing.Size(346, 434);
             this.mappingReferenceGroupBox.TabIndex = 12;
             this.mappingReferenceGroupBox.TabStop = false;
             this.mappingReferenceGroupBox.Text = "Mapping 参考指标";
@@ -250,12 +254,32 @@ namespace MicroLaman
             // mappingPcaRadioButton
             //
             this.mappingPcaRadioButton.AutoSize = true;
-            this.mappingPcaRadioButton.Location = new System.Drawing.Point(18, 280);
+            this.mappingPcaRadioButton.Location = new System.Drawing.Point(18, 328);
             this.mappingPcaRadioButton.Name = "mappingPcaRadioButton";
             this.mappingPcaRadioButton.Size = new System.Drawing.Size(199, 35);
-            this.mappingPcaRadioButton.TabIndex = 5;
+            this.mappingPcaRadioButton.TabIndex = 6;
             this.mappingPcaRadioButton.Text = "PCA 全谱异常";
             this.mappingPcaRadioButton.UseVisualStyleBackColor = true;
+            //
+            // mappingFullSpectrumRadioButton
+            //
+            this.mappingFullSpectrumRadioButton.AutoSize = true;
+            this.mappingFullSpectrumRadioButton.Location = new System.Drawing.Point(18, 280);
+            this.mappingFullSpectrumRadioButton.Name = "mappingFullSpectrumRadioButton";
+            this.mappingFullSpectrumRadioButton.Size = new System.Drawing.Size(248, 35);
+            this.mappingFullSpectrumRadioButton.TabIndex = 5;
+            this.mappingFullSpectrumRadioButton.Text = "全谱差异（荧光）";
+            this.mappingFullSpectrumRadioButton.UseVisualStyleBackColor = true;
+            //
+            // mappingReferenceHintLabel
+            //
+            this.mappingReferenceHintLabel.AutoSize = false;
+            this.mappingReferenceHintLabel.ForeColor = System.Drawing.Color.DimGray;
+            this.mappingReferenceHintLabel.Location = new System.Drawing.Point(18, 376);
+            this.mappingReferenceHintLabel.Name = "mappingReferenceHintLabel";
+            this.mappingReferenceHintLabel.Size = new System.Drawing.Size(304, 43);
+            this.mappingReferenceHintLabel.TabIndex = 7;
+            this.mappingReferenceHintLabel.Text = "自动推荐会比较全部标准后选择；全谱差异适合荧光或未知样品。";
             //
             // mappingPeakWidthRadioButton
             //
@@ -504,6 +528,8 @@ namespace MicroLaman
         private System.Windows.Forms.Panel panel1;
         private System.Windows.Forms.GroupBox mappingReferenceGroupBox;
         private System.Windows.Forms.RadioButton mappingAutomaticRadioButton;
+        private System.Windows.Forms.RadioButton mappingFullSpectrumRadioButton;
+        private System.Windows.Forms.Label mappingReferenceHintLabel;
         private System.Windows.Forms.RadioButton mappingPcaRadioButton;
         private System.Windows.Forms.RadioButton mappingPeakWidthRadioButton;
         private System.Windows.Forms.RadioButton mappingPeakPositionRadioButton;

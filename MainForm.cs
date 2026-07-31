@@ -706,7 +706,7 @@ namespace MicroLaman
             double halfWidth = 20.0;
             double referenceShift = double.NaN;
             double referenceHalfWidth = double.NaN;
-            if (mappingMode != RamanMappingMode.Pca)
+            if (RequiresPeakParameters(mappingMode))
             {
                 try
                 {
@@ -733,13 +733,28 @@ namespace MicroLaman
             {
                 IDictionary<int, Color> colors;
                 string mappingTitle;
-                if (mappingMode == RamanMappingMode.Automatic && halfWidth >= 55.0)
+                if (mappingMode == RamanMappingMode.Automatic)
+                {
+                    AutomaticRamanMappingResult result = await Task.Run(() =>
+                        AutomaticRamanMappingAnalyzer.Analyze(
+                            spectra,
+                            new AutoDetectedRamanPeak
+                            {
+                                Center = targetShift,
+                                HalfWidth = halfWidth,
+                                ReferenceCenter = referenceShift,
+                                ReferenceHalfWidth = referenceHalfWidth
+                            }));
+                    colors = result.Colors;
+                    mappingTitle = "拉曼 Mapping（" + result.Description + "）";
+                }
+                else if (mappingMode == RamanMappingMode.FullSpectrumDifference)
                 {
                     FullSpectrumDifferenceMappingResult result = await Task.Run(() =>
                         FullSpectrumDifferenceMappingAnalyzer.Analyze(spectra));
                     colors = result.Colors;
                     mappingTitle =
-                        "拉曼 Mapping（自动判断：未发现可靠窄峰，显示荧光/全谱差异）";
+                        "拉曼 Mapping（全谱差异：相对背景的荧光/波形变化）";
                 }
                 else if (mappingMode == RamanMappingMode.Pca)
                 {
@@ -752,17 +767,13 @@ namespace MicroLaman
                 }
                 else
                 {
-                    RamanMappingMode effectiveMode = mappingMode == RamanMappingMode.Automatic
-                        ? RamanMappingMode.PeakArea
-                        : mappingMode;
                     LabSpecPeakMappingResult result = await Task.Run(() =>
                         LabSpecPeakMappingAnalyzer.Analyze(
                             spectra, targetShift, halfWidth,
-                            referenceShift, referenceHalfWidth, effectiveMode));
+                            referenceShift, referenceHalfWidth, mappingMode));
                     colors = result.Colors;
                     mappingTitle = string.Format(
-                        "拉曼 Mapping（{0}峰 {1:F1}±{2:F1} cm⁻¹，{3}{4}）",
-                        mappingMode == RamanMappingMode.Automatic ? "自动判断：" : "自动",
+                        "拉曼 Mapping（自动峰 {0:F1}±{1:F1} cm⁻¹，{2}{3}）",
                         result.TargetShift,
                         result.HalfWidth,
                         result.MetricDisplayName,
@@ -795,8 +806,18 @@ namespace MicroLaman
             if (mappingPeakHeightRadioButton.Checked) return RamanMappingMode.PeakHeight;
             if (mappingPeakPositionRadioButton.Checked) return RamanMappingMode.PeakPosition;
             if (mappingPeakWidthRadioButton.Checked) return RamanMappingMode.PeakWidth;
+            if (mappingFullSpectrumRadioButton.Checked) return RamanMappingMode.FullSpectrumDifference;
             if (mappingPcaRadioButton.Checked) return RamanMappingMode.Pca;
             return RamanMappingMode.PeakArea;
+        }
+
+        private static bool RequiresPeakParameters(RamanMappingMode mappingMode)
+        {
+            return mappingMode == RamanMappingMode.Automatic
+                || mappingMode == RamanMappingMode.PeakHeight
+                || mappingMode == RamanMappingMode.PeakArea
+                || mappingMode == RamanMappingMode.PeakPosition
+                || mappingMode == RamanMappingMode.PeakWidth;
         }
 
         /// <summary>复制一份完整扫描数据，使后台计算期间不持有采集数据锁。</summary>
@@ -843,7 +864,7 @@ namespace MicroLaman
             ScottPlot.Fonts.Default = plotFont;
             formsPlot1.Plot.Clear();
             formsPlot1.Plot.Title("等待光谱采集");
-            formsPlot1.Plot.XLabel("拉曼位移 (cm⁻¹)");
+            formsPlot1.Plot.XLabel("拉曼位移");
             formsPlot1.Plot.YLabel("强度");
             formsPlot1.Plot.Axes.Title.Label.FontName = plotFont;
             formsPlot1.Plot.Axes.Bottom.Label.FontName = plotFont;

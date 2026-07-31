@@ -8,6 +8,7 @@ namespace MicroLaman
     {
         internal IDictionary<int, Color> Colors { get; set; }
         internal int ComponentCount { get; set; }
+        internal double QualityScore { get; set; }
     }
 
     /// <summary>
@@ -98,7 +99,12 @@ namespace MicroLaman
                 double value = Clamp01((distances[row] - colorStart) / (colorEnd - colorStart));
                 colors[spectra[row].ScanIndex] = GetPseudoColor(value);
             }
-            return new PcaMappingResult { Colors = colors, ComponentCount = componentCount };
+            return new PcaMappingResult
+            {
+                Colors = colors,
+                ComponentCount = componentCount,
+                QualityScore = Math.Max(0.0, (Percentile(distances, 0.98) - center) / sigma)
+            };
         }
 
         private static List<int> GetFeatureIndexes(double[] shifts)

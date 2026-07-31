@@ -20,6 +20,8 @@ namespace MicroLaman
         internal bool UsedReferenceNormalization { get; set; }
         internal double ReferenceShift { get; set; }
         internal string MetricDisplayName { get; set; }
+        internal double QualityScore { get; set; }
+        internal double ValidFraction { get; set; }
     }
 
     /// <summary>
@@ -242,8 +244,36 @@ namespace MicroLaman
                 HalfWidth = halfWidth,
                 UsedReferenceNormalization = useReference,
                 ReferenceShift = referenceShift,
-                MetricDisplayName = GetMetricDisplayName(mappingMode)
+                MetricDisplayName = GetMetricDisplayName(mappingMode),
+                QualityScore = CalculateQualityScore(values),
+                ValidFraction = CalculateValidFraction(values)
             };
+        }
+
+        private static double CalculateValidFraction(double[] values)
+        {
+            int validCount = 0;
+            for (int index = 0; index < values.Length; index++)
+                if (!double.IsNaN(values[index]) && !double.IsInfinity(values[index]))
+                    validCount++;
+            return values.Length == 0 ? 0.0 : (double)validCount / values.Length;
+        }
+
+        private static double CalculateQualityScore(double[] values)
+        {
+            List<double> valid = new List<double>();
+            for (int index = 0; index < values.Length; index++)
+                if (!double.IsNaN(values[index]) && !double.IsInfinity(values[index]))
+                    valid.Add(values[index]);
+            if (valid.Count < 3) return 0.0;
+
+            double[] ordered = valid.ToArray();
+            double center = Percentile(ordered, 0.50);
+            double[] deviations = new double[ordered.Length];
+            for (int index = 0; index < ordered.Length; index++)
+                deviations[index] = Math.Abs(ordered[index] - center);
+            double sigma = Math.Max(1e-12, 1.4826 * Percentile(deviations, 0.50));
+            return Math.Max(0.0, (Percentile(ordered, 0.98) - center) / sigma);
         }
 
         private struct PeakMeasurement

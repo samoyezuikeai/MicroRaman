@@ -151,6 +151,7 @@
     <Compile Include="LabSpecPeakMappingAnalyzer.cs" />
     <Compile Include="PcaMappingAnalyzer.cs" />
     <Compile Include="FullSpectrumDifferenceMappingAnalyzer.cs" />
+    <Compile Include="AutomaticRamanMappingAnalyzer.cs" />
     <Compile Include="RamanMappingOptionsForm.cs">
       <SubType>Form</SubType>
     </Compile>

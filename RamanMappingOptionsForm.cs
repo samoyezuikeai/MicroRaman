@@ -11,6 +11,7 @@ namespace MicroLaman
         PeakArea,
         PeakPosition,
         PeakWidth,
+        FullSpectrumDifference,
         Pca
     }
 

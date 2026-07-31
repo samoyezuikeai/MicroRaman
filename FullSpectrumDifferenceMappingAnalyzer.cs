@@ -8,6 +8,7 @@ namespace MicroLaman
     {
         internal IDictionary<int, Color> Colors { get; set; }
         internal double ContrastRatio { get; set; }
+        internal double QualityScore { get; set; }
     }
 
     /// <summary>
@@ -89,7 +90,8 @@ namespace MicroLaman
             return new FullSpectrumDifferenceMappingResult
             {
                 Colors = colors,
-                ContrastRatio = colorEnd / Math.Max(1e-9, center)
+                ContrastRatio = colorEnd / Math.Max(1e-9, center),
+                QualityScore = Math.Max(0.0, (Percentile(scores, 0.98) - center) / sigma)
             };
         }
 
