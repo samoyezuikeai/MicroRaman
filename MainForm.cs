@@ -23,8 +23,8 @@ namespace MicroLaman
         private Task realtimeSpectrumTask;
         private DateTime scanStartedUtc = DateTime.MinValue;
         private static readonly TimeSpan ScanDoubleClickGuard = TimeSpan.FromMilliseconds(800);
-        // GODZILLA 配套示例的界面默认值为 100 ms；用户可在主窗口中修改并应用。
-        private const double DefaultSpectrometerIntegrationTimeMilliseconds = 100.0;
+        // Raman mapping 默认采用 1000 ms 积分；用户可在主窗口中修改并应用。
+        private const double DefaultSpectrometerIntegrationTimeMilliseconds = 1000.0;
         private readonly StageScanController stageScanController = new StageScanController();
         private readonly object laserDeviceSync = new object();
         private readonly object spectrometerDeviceSync = new object();
@@ -37,10 +37,9 @@ namespace MicroLaman
         private readonly Dictionary<int, RamanSpectrum> laserOnSpectra =
             new Dictionary<int, RamanSpectrum>();
         private readonly object darkSpectrumSync = new object();
-        // 手动“采集暗谱”保存的背景用于实时光谱；扫描时每个点单独采集背景，不复用这里的数据。
+        // 手动“采集暗谱”保存的背景用于实时光谱；扫描使用每轮开始时单独采集的全局暗谱。
         private double[] savedDarkSpectrum;
-        private readonly Dictionary<int, double[]> scanDarkSpectra =
-            new Dictionary<int, double[]>();
+        private double[] scanDarkSpectrum;
         private bool laserEnabled;
         private bool tecEnabled;
 
@@ -183,17 +182,17 @@ namespace MicroLaman
                         throw new InvalidOperationException("Terra SDK 未返回有效的光谱仪积分时间范围。");
 
                     double requestedIntegrationTime = ClampIntegrationTime(
-                        spectrometerIntegrationTimeMilliseconds,
+                        DefaultSpectrometerIntegrationTimeMilliseconds,
                         minimumIntegrationTime,
                         maximumIntegrationTime);
-                    connectedSpectrometer.setIntegrationTime(requestedIntegrationTime);
                     connectedLaser.setLDOff();
                     connectedLaser.setTECOff();
                     laserDevice = connectedLaser;
                     spectrometerDevice = connectedSpectrometer;
                     spectrometerMinimumIntegrationTimeMilliseconds = minimumIntegrationTime;
                     spectrometerMaximumIntegrationTimeMilliseconds = maximumIntegrationTime;
-                    spectrometerIntegrationTimeMilliseconds = requestedIntegrationTime;
+                    // 与左侧“应用参数”使用同一套 SDK 范围校验和写入逻辑。
+                    ApplySpectrometerIntegrationTime(requestedIntegrationTime);
                     laserEnabled = false;
                     tecEnabled = false;
                 }
@@ -330,7 +329,7 @@ namespace MicroLaman
                 throw new InvalidOperationException(
                     "Terra SDK 未提供有效的激发波长，无法计算拉曼位移。请先在设备参数中设置实际激光波长。");
 
-            double[] darkSpectrum = GetScanDarkSpectrum(scanIndex, intensities.Length);
+            double[] darkSpectrum = GetScanDarkSpectrum(intensities.Length);
             double[] correctedIntensities = SubtractDarkSpectrumAndSmooth(intensities, darkSpectrum);
             RamanSpectrum laserOnSpectrum = CreateRamanSpectrum(
                 wavelengths, correctedIntensities, excitationWavelength);
@@ -338,7 +337,7 @@ namespace MicroLaman
             ShowSpectrum(
                 laserOnSpectrum.RamanShifts,
                 laserOnSpectrum.Intensities,
-                "开激光拉曼谱（已扣除当前点暗谱）");
+                "开激光拉曼谱（已扣除扫描暗谱）");
             MarkScanPointSpectrumAvailable(scanIndex);
             return true;
         }
@@ -356,20 +355,20 @@ namespace MicroLaman
                 "光谱仪未返回有效光谱，扫描已安全停止。请重新插拔光谱仪USB或者重启程序。");
         }
 
-        /// <summary>在当前平台点、LD 关闭状态下采集暗谱，供紧随其后的开激光读谱扣除。</summary>
-        private void CaptureDarkSpectrumForScan(int scanIndex)
+        /// <summary>扫描开始时在 LD 关闭状态采集一张全局暗谱，供整张 Raman map 扣除。</summary>
+        private void CaptureDarkSpectrumForScan()
         {
             double[] intensities = ReadCurrentSpectrumIntensities("扫描暗谱");
             lock (darkSpectrumSync)
             {
-                scanDarkSpectra[scanIndex] = (double[])intensities.Clone();
+                scanDarkSpectrum = (double[])intensities.Clone();
             }
         }
 
-        /// <summary>清除首个开激光积分切换时可能残留的缓存帧，不显示也不保存。</summary>
+        /// <summary>读取并丢弃状态切换前缓存的光谱帧，不显示也不保存。</summary>
         private void DiscardSpectrumForScan()
         {
-            ReadCurrentSpectrumIntensities("首点过渡光谱");
+            ReadCurrentSpectrumIntensities("状态切换缓存光谱");
         }
 
         /// <summary>读取一张原始强度帧，不改变连接、激光或积分时间设置。</summary>
@@ -385,16 +384,15 @@ namespace MicroLaman
             }
         }
 
-        private double[] GetScanDarkSpectrum(int scanIndex, int expectedLength)
+        private double[] GetScanDarkSpectrum(int expectedLength)
         {
             lock (darkSpectrumSync)
             {
-                double[] darkSpectrum;
-                if (!scanDarkSpectra.TryGetValue(scanIndex, out darkSpectrum))
-                    throw new InvalidOperationException("当前扫描点未采集到暗谱，无法进行背景扣除。");
-                if (darkSpectrum.Length != expectedLength)
-                    throw new InvalidOperationException("当前扫描点的暗谱长度与开激光光谱不一致，无法进行背景扣除。");
-                return (double[])darkSpectrum.Clone();
+                if (scanDarkSpectrum == null)
+                    throw new InvalidOperationException("本轮扫描未采集暗谱，无法进行背景扣除。");
+                if (scanDarkSpectrum.Length != expectedLength)
+                    throw new InvalidOperationException("扫描暗谱长度与开激光光谱不一致，无法进行背景扣除。");
+                return (double[])scanDarkSpectrum.Clone();
             }
         }
 
@@ -987,7 +985,7 @@ namespace MicroLaman
             lock (darkSpectrumSync)
             {
                 savedDarkSpectrum = null;
-                scanDarkSpectra.Clear();
+                scanDarkSpectrum = null;
             }
 
             lock (laserDeviceSync)
@@ -1013,7 +1011,7 @@ namespace MicroLaman
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
             lock (darkSpectrumSync)
-                scanDarkSpectra.Clear();
+                scanDarkSpectrum = null;
             scanMatrixPreviewControl.ClearSpectrumAvailability();
             InitializeSpectrumPlot();
         }

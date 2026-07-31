@@ -228,7 +228,7 @@ namespace MicroLaman
             this.spectrometerIntegrationTimeTextBox.Name = "spectrometerIntegrationTimeTextBox";
             this.spectrometerIntegrationTimeTextBox.Size = new System.Drawing.Size(138, 41);
             this.spectrometerIntegrationTimeTextBox.TabIndex = 9;
-            this.spectrometerIntegrationTimeTextBox.Text = "100";
+            this.spectrometerIntegrationTimeTextBox.Text = "1000";
             // 
             // integrationTimeLabel
             // 

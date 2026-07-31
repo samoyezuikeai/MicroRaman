@@ -87,8 +87,11 @@ namespace MicroLaman
         // 每次切换 LD 后都重新开始一次积分，避免把切换前的残留帧当成当前状态的光谱。
         private const int SpectrometerWarmupDelayMilliseconds = 100;
         private const int ScanPointSettlingDelayMilliseconds = 100;
-        // 等待时间由 MainForm 中已应用的积分时间计算，额外留出少量切换裕量。
+        // 状态切换后等待完整积分并留出少量通信裕量，确保取到当前 LD 状态的帧。
         private const int IntegrationSafetyMarginMilliseconds = 100;
+        // 短积分（例如 100 ms）时，LD 输出与光谱仪帧切换仍需要额外稳定时间。
+        // 小于此值会把尚未建立的亮帧误当成有效拉曼谱；达到该积分时间后不再附加 LD 延迟。
+        private const int MinimumLaserOnSettlingDelayMilliseconds = 500;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
 
         /// <summary>
@@ -193,7 +196,7 @@ namespace MicroLaman
             Action<bool> setLaserOutput,
             Action<bool> setTecOutput,
             Action warmUpSpectrum,
-            Action<int> captureDarkSpectrum,
+            Action captureDarkSpectrum,
             Action discardSpectrum,
             int integrationTimeMilliseconds,
             Func<int, bool> acquireSpectrum)
@@ -244,6 +247,13 @@ namespace MicroLaman
                 progress.Report("光谱仪预热中…");
                 warmUpSpectrum();
                 WaitForScanDelay(SpectrometerWarmupDelayMilliseconds, cancellationToken);
+                // Raman mapping 的暗谱代表探测器/光路背景；每张 map 开始时采一张即可。
+                // 先清除启动前缓存，再等待完整积分，避免把上一次采集残留写入背景。
+                int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
+                progress.Report("采集扫描暗谱…");
+                discardSpectrum();
+                WaitForScanDelay(completeIntegrationDelay, cancellationToken);
+                captureDarkSpectrum();
                 camera.PrepareForNewScan();
 
                 for (int index = 0; index < normalizedPoints.Count; index++)
@@ -264,25 +274,17 @@ namespace MicroLaman
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
                     WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
-                    // 每个点都在当前位置独立采集暗谱：移动稳定后、打开 LD 前等待一个积分周期并读取。
-                    // 紧随其后的开激光读谱会在 MainForm 中扣除这张同位置暗谱。
-                    int completeIntegrationDelay = integrationTimeMilliseconds + IntegrationSafetyMarginMilliseconds;
-                    progress.Report(string.Format("采集暗谱 {0}/{1}", index + 1, normalizedPoints.Count));
-                    WaitForScanDelay(completeIntegrationDelay, cancellationToken);
-                    captureDarkSpectrum(index);
-
+                    // 每个点只采一张开激光谱；全局暗谱已在扫描开始时采集。
+                    // 开 LD 后仍丢掉一张关 LD 缓存帧，保证亮谱来自当前点、当前 LD 状态。
                     setLaserOutput(true);
                     try
                     {
-                        WaitForScanDelay(completeIntegrationDelay, cancellationToken);
-                        if (index == 0)
-                        {
-                            // 首次由关 LD 切到开 LD 时，设备可能先吐出切换前已经在缓存中的帧。
-                            // 仅丢弃这一张过渡帧，再等待一个完整积分周期后才保存第 1 点。
-                            progress.Report("首点开激光稳定中…");
-                            discardSpectrum();
-                            WaitForScanDelay(completeIntegrationDelay, cancellationToken);
-                        }
+                        progress.Report(string.Format("开激光稳定中 {0}/{1}", index + 1, normalizedPoints.Count));
+                        discardSpectrum();
+                        int laserOnDelay = integrationTimeMilliseconds < MinimumLaserOnSettlingDelayMilliseconds
+                            ? MinimumLaserOnSettlingDelayMilliseconds
+                            : integrationTimeMilliseconds;
+                        WaitForScanDelay(laserOnDelay, cancellationToken);
                         progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         acquireSpectrum(index);
                     }
