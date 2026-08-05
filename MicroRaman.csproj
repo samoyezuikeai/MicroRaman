@@ -144,18 +144,19 @@
     <Compile Include="LaserSettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="LaserSettingsForm.Designer.cs">
+      <DependentUpon>LaserSettingsForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="DarkSpectrumPromptForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DarkSpectrumPromptForm.Designer.cs">
+      <DependentUpon>DarkSpectrumPromptForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="RamanMappingAnalyzer.cs" />
-    <Compile Include="LabSpecPeakMappingAnalyzer.cs" />
-    <Compile Include="PcaMappingAnalyzer.cs" />
-    <Compile Include="FullSpectrumDifferenceMappingAnalyzer.cs" />
-    <Compile Include="AutomaticRamanMappingAnalyzer.cs" />
     <Compile Include="RamanMappingOptionsForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="ToolbarIconFactory.cs" />
     <Compile Include="StageScanController.cs" />
     <Compile Include="TUCamNative.cs" />
     <Compile Include="SerialPortManager.cs" />
@@ -170,6 +171,9 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="CameraShowForm.resx">
       <DependentUpon>CameraShowForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="DarkSpectrumPromptForm.resx">
+      <DependentUpon>DarkSpectrumPromptForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="LaserSettingsForm.resx">
       <DependentUpon>LaserSettingsForm.cs</DependentUpon>
@@ -187,6 +191,9 @@
       <DependentUpon>Resources.resx</DependentUpon>
       <DesignTime>True</DesignTime>
     </Compile>
+    <EmbeddedResource Include="RamanMappingOptionsForm.resx">
+      <DependentUpon>RamanMappingOptionsForm.cs</DependentUpon>
+    </EmbeddedResource>
     <None Include="OpenTK.dll.config" />
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">

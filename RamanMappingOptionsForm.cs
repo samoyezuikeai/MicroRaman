@@ -2,11 +2,10 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     internal enum RamanMappingMode
     {
-        Automatic,
         PeakHeight,
         PeakArea,
         PeakPosition,
@@ -15,14 +14,23 @@ namespace MicroLaman
         Pca
     }
 
-    /// <summary>LabSpec 风格的单变量峰面积 Mapping 参数窗口。</summary>
+    /// <summary>
+    /// 收集峰高或峰面积 Mapping 的目标拉曼位移范围。
+    /// 系统只在用户指定的范围内寻找峰并计算指标。
+    /// </summary>
     internal sealed class RamanMappingOptionsForm : Form
     {
-        private readonly NumericUpDown targetShiftInput;
-        private readonly NumericUpDown halfWidthInput;
-        private readonly CheckBox siliconNormalizationCheckBox;
+        private readonly NumericUpDown rangeStartInput;
+        private readonly NumericUpDown rangeEndInput;
 
-        internal RamanMappingOptionsForm(double suggestedTargetShift, RamanMappingMode mappingMode)
+        /// <summary>
+        /// 初始化目标峰范围输入窗口。
+        /// 峰高和峰面积将只使用该闭区间中的最大峰。
+        /// </summary>
+        internal RamanMappingOptionsForm(
+            RamanMappingMode mappingMode,
+            double suggestedStart,
+            double suggestedEnd)
         {
             Text = "拉曼 Mapping 参数";
             Font = new Font("Microsoft YaHei UI", 9F);
@@ -31,84 +39,102 @@ namespace MicroLaman
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(470, 245);
+            ClientSize = new Size(490, 215);
 
             Label description = new Label
             {
                 AutoSize = false,
                 Location = new Point(18, 14),
-                Size = new Size(435, 48),
-                Text = "设置需要分析的目标拉曼峰。当前指标：" + GetModeDisplayName(mappingMode) + "。"
+                Size = new Size(450, 48),
+                Text = "填写目标峰所在的拉曼位移范围。当前指标："
+                    + GetModeDisplayName(mappingMode)
+                    + "。系统只在这个范围内寻找峰，不会使用整条光谱的最大峰。"
             };
-            Label targetLabel = new Label
+            Label rangeStartLabel = new Label
             {
                 AutoSize = true,
                 Location = new Point(18, 76),
-                Text = "目标峰中心 (cm⁻¹)："
+                Text = "范围起点 (cm⁻¹)："
             };
-            targetShiftInput = new NumericUpDown
+            rangeStartInput = new NumericUpDown
             {
                 DecimalPlaces = 1,
                 Increment = 1M,
-                Minimum = 100M,
-                Maximum = 3200M,
-                Location = new Point(215, 72),
+                Minimum = -500M,
+                Maximum = 3500M,
+                Location = new Point(220, 72),
                 Size = new Size(130, 30),
-                Value = ClampDecimal(suggestedTargetShift, 100M, 3200M)
+                Value = ClampDecimal(suggestedStart, -500M, 3500M)
             };
-            Label widthLabel = new Label
+            Label rangeEndLabel = new Label
             {
                 AutoSize = true,
                 Location = new Point(18, 117),
-                Text = "积分半宽 (cm⁻¹)："
+                Text = "范围终点 (cm⁻¹)："
             };
-            halfWidthInput = new NumericUpDown
+            rangeEndInput = new NumericUpDown
             {
                 DecimalPlaces = 1,
                 Increment = 1M,
-                Minimum = 5M,
-                Maximum = 100M,
-                Location = new Point(215, 113),
+                Minimum = -500M,
+                Maximum = 3500M,
+                Location = new Point(220, 113),
                 Size = new Size(130, 30),
-                Value = 20M
-            };
-            siliconNormalizationCheckBox = new CheckBox
-            {
-                AutoSize = true,
-                Checked = true,
-                Enabled = mappingMode == RamanMappingMode.PeakHeight
-                    || mappingMode == RamanMappingMode.PeakArea,
-                Location = new Point(21, 157),
-                Text = "使用软件自动识别的稳定参考峰归一化"
+                Value = ClampDecimal(suggestedEnd, -500M, 3500M)
             };
             Button okButton = new Button
             {
-                DialogResult = DialogResult.OK,
-                Location = new Point(270, 198),
+                Location = new Point(285, 164),
                 Size = new Size(82, 34),
                 Text = "生成"
             };
+            okButton.Click += OkButton_Click;
             Button cancelButton = new Button
             {
                 DialogResult = DialogResult.Cancel,
-                Location = new Point(365, 198),
+                Location = new Point(382, 164),
                 Size = new Size(82, 34),
                 Text = "取消"
             };
 
             Controls.AddRange(new Control[]
             {
-                description, targetLabel, targetShiftInput, widthLabel, halfWidthInput,
-                siliconNormalizationCheckBox, okButton, cancelButton
+                description, rangeStartLabel, rangeStartInput, rangeEndLabel, rangeEndInput,
+                okButton, cancelButton
             });
             AcceptButton = okButton;
             CancelButton = cancelButton;
         }
 
-        internal double TargetShift { get { return (double)targetShiftInput.Value; } }
-        internal double HalfWidth { get { return (double)halfWidthInput.Value; } }
-        internal bool NormalizeToSilicon { get { return siliconNormalizationCheckBox.Checked; } }
+        internal double RangeStart { get { return (double)rangeStartInput.Value; } }
+        internal double RangeEnd { get { return (double)rangeEndInput.Value; } }
 
+        /// <summary>
+        /// 验证用户给出的目标峰范围。
+        /// 起点必须小于终点，且范围至少覆盖一个有效光谱采样点。
+        /// </summary>
+        private void OkButton_Click(object sender, EventArgs e)
+        {
+            if (RangeEnd <= RangeStart)
+            {
+                MessageBox.Show(this, "范围终点必须大于范围起点。", "拉曼 Mapping 参数",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (RangeEnd - RangeStart < 2.0)
+            {
+                MessageBox.Show(this, "拉曼位移范围过窄，请至少设置 2 cm⁻¹。", "拉曼 Mapping 参数",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            DialogResult = DialogResult.OK;
+        }
+
+        /// <summary>
+        /// 获取ModeDisplayName相关的内部处理。
+        /// </summary>
         private static string GetModeDisplayName(RamanMappingMode mode)
         {
             switch (mode)
@@ -119,11 +145,14 @@ namespace MicroLaman
                 default: return "峰面积";
             }
         }
+        /// <summary>
+        /// 限制Decimal相关的内部处理。
+        /// </summary>
         private static decimal ClampDecimal(double value, decimal minimum, decimal maximum)
         {
             decimal converted;
             try { converted = Convert.ToDecimal(value); }
-            catch { converted = 960M; }
+            catch { converted = 0M; }
             return Math.Max(minimum, Math.Min(maximum, converted));
         }
     }

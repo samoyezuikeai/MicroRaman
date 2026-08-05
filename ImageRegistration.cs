@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 用于图像配准的降采样灰度帧。
@@ -304,3 +304,4 @@ namespace MicroLaman
         }
     }
 }
+

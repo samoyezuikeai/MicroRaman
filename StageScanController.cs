@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 表示平台三轴坐标；当前扫描只改变 X、Y，Z 始终保持原值。
@@ -16,7 +16,9 @@ namespace MicroLaman
         internal double Z;
     }
 
-    /// <summary>明场定位校验的像素误差汇总。</summary>
+    /// <summary>
+    /// 明场定位校验的像素误差汇总。
+    /// </summary>
     internal struct AlignmentVerificationResult
     {
         internal int PointCount;
@@ -93,6 +95,9 @@ namespace MicroLaman
         // 换行点在采暗谱期间 LD 关闭更久，重新开启后需要更长时间恢复稳定输出。
         private const int LaserOnSettlingAfterDarkDelayMilliseconds = 800;
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
+        // 常规定标先使用三个独立点快速校验；误差较大时再自动执行完整九点微调。
+        // 这样不会以牺牲坐标精度为代价缩短定标时间。
+        private const double FastVerificationTargetErrorPixels = 10.0;
 
         /// <summary>
         /// 获取当前控制器是否保存了可用于扫描的完整标定数据。
@@ -143,14 +148,14 @@ namespace MicroLaman
 
             double xDistance = GetCalibrationDistance(dimensions[0]);
             double yDistance = GetCalibrationDistance(dimensions[1]);
+            // X+/X−、Y+/Y−已经能完整拟合二维仿射换算，并可抵消两个方向的反向间隙。
+            // 对角线两次移动只提供重复样本，改由后续独立三点复测承担校验。
             CalibrationMove[] moves = new[]
             {
                 new CalibrationMove(xDistance, 0, "X+"),
                 new CalibrationMove(-xDistance, 0, "X−"),
                 new CalibrationMove(0, yDistance, "Y+"),
-                new CalibrationMove(0, -yDistance, "Y−"),
-                new CalibrationMove(xDistance, yDistance, "X+Y+"),
-                new CalibrationMove(-xDistance, -yDistance, "X−Y−")
+                new CalibrationMove(0, -yDistance, "Y−")
             };
             List<CenteringMeasurement> measurements = new List<CenteringMeasurement>(moves.Length);
             for (int index = 0; index < moves.Length; index++)
@@ -172,8 +177,15 @@ namespace MicroLaman
             savedImageWidth = camera.CameraImageWidth;
             savedImageHeight = camera.CameraImageHeight;
             savedCalibrationZ = origin.Z;
-            progress.Report("自动校正并复测定位精度");
-            AlignmentVerificationResult verification = VerifyCentering(camera, progress, cancellationToken);
+            progress.Report("快速复测定位精度");
+            AlignmentVerificationResult verification = VerifyCenteringQuick(camera, progress, cancellationToken);
+            if (verification.MaximumErrorPixels > FastVerificationTargetErrorPixels)
+            {
+                progress.Report(string.Format(
+                    "快速复测偏差 {0:F2} 像素，执行完整微调复测…",
+                    verification.MaximumErrorPixels));
+                verification = VerifyCentering(camera, progress, cancellationToken);
+            }
             if (verification.MaximumErrorPixels > MaximumAllowedCenteringErrorPixels)
             {
                 throw new InvalidOperationException(string.Format(
@@ -183,6 +195,87 @@ namespace MicroLaman
             }
             progress.Report(string.Format("标定完成（最大偏差 {0:F2} 像素）", verification.MaximumErrorPixels));
             return verification;
+        }
+
+        /// <summary>
+        /// 常规定标完成后的快速独立校验。 三个非共线点能够同时覆盖 X、Y 和斜向位移；只有其误差偏大时才进入耗时的九点微调。
+        /// </summary>
+        private AlignmentVerificationResult VerifyCenteringQuick(
+            CameraShowForm camera,
+            IProgress<string> progress,
+            CancellationToken cancellationToken)
+        {
+            StagePosition verificationOrigin = command.ReadPosition();
+            List<PointF> testPoints = CreateQuickVerificationPoints(savedImageWidth, savedImageHeight);
+            StagePixelCalibration originalCalibration = savedCalibration;
+
+            try
+            {
+                List<CenteringMeasurement> initialMeasurements;
+                AlignmentErrorSummary initial = MeasureCentering(
+                    camera,
+                    originalCalibration,
+                    verificationOrigin,
+                    testPoints,
+                    "快速复测",
+                    progress,
+                    cancellationToken,
+                    out initialMeasurements);
+
+                if (initial.MaximumErrorPixels <= FastVerificationTargetErrorPixels)
+                    return CreateVerificationResult(testPoints.Count, initial, initial, false);
+
+                // 快速复测不合格时，先仅使用这三个非共线实测点做一次矩阵微调，
+                // 再以另一组三点独立验证。常见的轻微反向间隙无需进入耗时九点流程。
+                StagePixelCalibration refinedCalibration = FitCalibration(initialMeasurements);
+                ReturnToScanOrigin(camera, verificationOrigin, savedDimensions);
+
+                List<PointF> confirmationPoints = CreateQuickConfirmationPoints(savedImageWidth, savedImageHeight);
+                List<CenteringMeasurement> confirmationMeasurements;
+                AlignmentErrorSummary refined = MeasureCentering(
+                    camera,
+                    refinedCalibration,
+                    verificationOrigin,
+                    confirmationPoints,
+                    "快速微调复测",
+                    progress,
+                    cancellationToken,
+                    out confirmationMeasurements);
+
+                bool improved = refined.MaximumErrorPixels < initial.MaximumErrorPixels;
+                if (improved)
+                    savedCalibration = refinedCalibration;
+
+                return CreateVerificationResult(
+                    testPoints.Count + confirmationPoints.Count,
+                    initial,
+                    improved ? refined : initial,
+                    improved);
+            }
+            finally
+            {
+                ReturnToScanOrigin(camera, verificationOrigin, savedDimensions);
+            }
+        }
+
+        /// <summary>
+        /// 创建VerificationResult相关的内部处理。
+        /// </summary>
+        private static AlignmentVerificationResult CreateVerificationResult(
+            int pointCount,
+            AlignmentErrorSummary initial,
+            AlignmentErrorSummary final,
+            bool refined)
+        {
+            return new AlignmentVerificationResult
+            {
+                PointCount = pointCount,
+                InitialAverageErrorPixels = initial.AverageErrorPixels,
+                InitialMaximumErrorPixels = initial.MaximumErrorPixels,
+                AverageErrorPixels = final.AverageErrorPixels,
+                MaximumErrorPixels = final.MaximumErrorPixels,
+                CalibrationRefined = refined
+            };
         }
 
         /// <summary>
@@ -347,8 +440,7 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 在明场下校验并微调标定矩阵，使中心附近目标点能更准确地移动到图像中心。
-        /// 只有复测误差变小时才保存微调后的矩阵，不执行激光扫描。
+        /// 在明场下校验并微调标定矩阵，使中心附近目标点能更准确地移动到图像中心。 只有复测误差变小时才保存微调后的矩阵，不执行激光扫描。
         /// </summary>
         internal AlignmentVerificationResult VerifyCentering(
             CameraShowForm camera,
@@ -419,7 +511,9 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>以指定矩阵完成一轮九点实测，并保留用于微调的实际位移数据。</summary>
+        /// <summary>
+        /// 以指定矩阵完成一轮定位实测，并保留用于微调的实际位移数据。
+        /// </summary>
         private AlignmentErrorSummary MeasureCentering(
             CameraShowForm camera,
             StagePixelCalibration calibration,
@@ -477,7 +571,9 @@ namespace MicroLaman
             };
         }
 
-        /// <summary>由九个实测点最小二乘拟合完整的二维平台到像素变换矩阵。</summary>
+        /// <summary>
+        /// 由实测点最小二乘拟合完整的二维平台到像素变换矩阵。
+        /// </summary>
         private static StagePixelCalibration FitCalibration(IList<CenteringMeasurement> measurements)
         {
             double sumXX = 0;
@@ -528,7 +624,9 @@ namespace MicroLaman
             internal double MaximumErrorPixels;
         }
 
-        /// <summary>建立中心周围 15% 视野范围内的 3×3 校验点，保证图像有足够重叠用于配准。</summary>
+        /// <summary>
+        /// 建立中心周围 15% 视野范围内的 3×3 校验点，保证图像有足够重叠用于配准。
+        /// </summary>
         private static List<PointF> CreateCenterVerificationPoints(int imageWidth, int imageHeight)
         {
             float offsetX = imageWidth * 0.15f;
@@ -546,14 +644,48 @@ namespace MicroLaman
             return points;
         }
 
-        /// <summary>定标或精度复测移动后的可取消稳定延时。</summary>
+        /// <summary>
+        /// 建立快速校验用的三个非共线点。它们与原点保持足够重叠，且不与初始六方向标定重复。
+        /// </summary>
+        private static List<PointF> CreateQuickVerificationPoints(int imageWidth, int imageHeight)
+        {
+            float offsetX = imageWidth * 0.15f;
+            float offsetY = imageHeight * 0.15f;
+            return new List<PointF>(3)
+            {
+                new PointF(imageWidth / 2f - offsetX, imageHeight / 2f - offsetY),
+                new PointF(imageWidth / 2f + offsetX, imageHeight / 2f - offsetY),
+                new PointF(imageWidth / 2f - offsetX, imageHeight / 2f + offsetY)
+            };
+        }
+
+        /// <summary>
+        /// 快速微调后的独立确认点，避免用参与拟合的同一批点自证精度。
+        /// </summary>
+        private static List<PointF> CreateQuickConfirmationPoints(int imageWidth, int imageHeight)
+        {
+            float offsetX = imageWidth * 0.15f;
+            float offsetY = imageHeight * 0.15f;
+            return new List<PointF>(3)
+            {
+                new PointF(imageWidth / 2f + offsetX, imageHeight / 2f + offsetY),
+                new PointF(imageWidth / 2f - offsetX, imageHeight / 2f),
+                new PointF(imageWidth / 2f, imageHeight / 2f + offsetY)
+            };
+        }
+
+        /// <summary>
+        /// 定标或精度复测移动后的可取消稳定延时。
+        /// </summary>
         private static void WaitForCalibrationSettling(CancellationToken cancellationToken)
         {
             if (cancellationToken.WaitHandle.WaitOne(CalibrationSettlingDelayMilliseconds))
                 cancellationToken.ThrowIfCancellationRequested();
         }
 
-        /// <summary>蛇形扫描点内的可取消短延时。</summary>
+        /// <summary>
+        /// 蛇形扫描点内的可取消短延时。
+        /// </summary>
         private static void WaitForScanDelay(int milliseconds, CancellationToken cancellationToken)
         {
             if (cancellationToken.WaitHandle.WaitOne(milliseconds))
@@ -593,13 +725,17 @@ namespace MicroLaman
                 && Math.Abs(actual.Y - target.Y) <= GetPositionTolerance(dimensions[1]);
         }
 
-        /// <summary>判断扫描前的 Z 是否仍与定标时完全一致。</summary>
+        /// <summary>
+        /// 判断扫描前的 Z 是否仍与定标时完全一致。
+        /// </summary>
         private bool HasCalibrationZChanged(double currentZ)
         {
             return !savedCalibrationZ.HasValue || Math.Abs(currentZ - savedCalibrationZ.Value) > 1e-6;
         }
 
-        /// <summary>稳定等待结束后再次确认平台仍停在当前扫描点。</summary>
+        /// <summary>
+        /// 稳定等待结束后再次确认平台仍停在当前扫描点。
+        /// </summary>
         private static void VerifySettledScanPoint(
             StagePosition target,
             StagePosition actual,
@@ -616,7 +752,9 @@ namespace MicroLaman
                 actual.Y));
         }
 
-        /// <summary>执行一次六方向校准位移，等待图像稳定后采集配准帧，并始终返回原点。</summary>
+        /// <summary>
+        /// 执行一次平台校准位移，等待图像稳定后采集配准帧，并始终返回原点。
+        /// </summary>
         private CenteringMeasurement MeasureCalibrationMove(
             CameraShowForm camera,
             StagePosition origin,
@@ -726,9 +864,14 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>六方向初始标定的单次相对平台位移。</summary>
+        /// <summary>
+        /// 初始标定的单次相对平台位移。
+        /// </summary>
         private struct CalibrationMove
         {
+            /// <summary>
+            /// 执行 CalibrationMove 相关的内部处理。
+            /// </summary>
             internal CalibrationMove(double deltaX, double deltaY, string name)
             {
                 DeltaX = deltaX;
@@ -742,3 +885,4 @@ namespace MicroLaman
         }
     }
 }
+

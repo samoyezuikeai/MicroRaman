@@ -1,4 +1,4 @@
-﻿namespace MicroLaman
+﻿namespace MicroRaman
 {
     partial class CameraShowForm
     {
@@ -344,7 +344,7 @@
             this.MinimumSize = new System.Drawing.Size(1428, 819);
             this.Name = "CameraShowForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "MIchrome 20 显微镜实时对焦";
+            this.Text = "显微镜实时画面";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.CameraShowForm_FormClosing);
             this.Shown += new System.EventHandler(this.CameraShowForm_Shown);
             this.controlPanel.ResumeLayout(false);

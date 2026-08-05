@@ -1,15 +1,16 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 提供 Terra USB 激光器的非模态设置界面，所有设备访问均由 MainForm 统一加锁执行。
     /// </summary>
-    internal sealed class LaserSettingsForm : Form
+    public sealed partial class LaserSettingsForm : Form
     {
         private Terra.Device laserDevice;
         private object deviceSync;
@@ -17,18 +18,6 @@ namespace MicroLaman
         private readonly List<Control> commandControls = new List<Control>();
         private readonly Label[] statusValues = new Label[9];
         private readonly Timer refreshTimer = new Timer();
-        private Label connectionLabel;
-        private Label powerRangeLabel;
-        private Label rawStatusLabel;
-        private Button ldToggleButton;
-        private Button tecToggleButton;
-        private CheckBox autoRefreshCheckBox;
-        private NumericUpDown periodValue;
-        private NumericUpDown temperatureValue;
-        private NumericUpDown powerValue;
-        private NumericUpDown pwmValue;
-        private NumericUpDown pwmCorrectValue;
-        private NumericUpDown currentValue;
         private bool commandsAllowed = true;
         private bool commandRunning;
         private bool statusRefreshing;
@@ -41,7 +30,18 @@ namespace MicroLaman
         public LaserSettingsForm()
         {
             InitializeComponent();
-            InitializeLaserControls();
+            if (!IsDesignTime)
+                InitializeLaserControlBehavior();
+        }
+
+        private static bool IsDesignTime
+        {
+            get
+            {
+                return LicenseManager.UsageMode == LicenseUsageMode.Designtime
+                    || (System.Diagnostics.Process.GetCurrentProcess().ProcessName ?? string.Empty)
+                        .IndexOf("designer", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
         }
 
         /// <summary>
@@ -67,303 +67,162 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 创建窗口的开关、温控、功率、电流和状态区域。
+        /// 初始化由 Designer 固定声明的控件与运行时状态数组。
         /// </summary>
-        private void InitializeLaserControls()
+        private void InitializeLaserControlBehavior()
         {
-            Text = "激光器设置";
-            StartPosition = FormStartPosition.CenterParent;
-            MinimumSize = new Size(1080, 680);
-            ClientSize = new Size(1180, 720);
-            // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
-            Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
-            StartPosition = FormStartPosition.CenterScreen;
-            Font = new Font("Microsoft YaHei UI", 9F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-
-            TableLayoutPanel root = new TableLayoutPanel
+            commandControls.AddRange(new Control[]
             {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(12),
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));
-            Controls.Add(root);
+                allOnButton, allOffButton, ldToggleButton, tecToggleButton,
+                periodValue, applyPeriodButton, temperatureValue, applyTemperatureButton,
+                powerValue, applyPowerButton, pwmValue, applyPwmButton,
+                pwmCorrectValue, applyPwmCorrectButton, currentValue, applyCurrentButton
+            });
 
-            connectionLabel = new Label
-            {
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font(Font, FontStyle.Bold)
-            };
-            root.Controls.Add(connectionLabel, 0, 0);
+            statusValues[0] = statusTemperatureValue;
+            statusValues[1] = statusTargetTemperatureValue;
+            statusValues[2] = statusTecCurrentValue;
+            statusValues[3] = statusKpValue;
+            statusValues[4] = statusKiValue;
+            statusValues[5] = statusKdValue;
+            statusValues[6] = statusTmpgnValue;
+            statusValues[7] = statusLdCurrentValue;
+            statusValues[8] = statusPowerOnValue;
 
-            TableLayoutPanel settings = new TableLayoutPanel
+            AddPresetButtons(periodPresetPanel, periodValue, new[] { 10, 100, 1000, 10000 }, "ms", () =>
+                ExecuteDeviceCommand(device => device.setLaserPeriod((int)periodValue.Value)));
+            AddPresetButtons(temperaturePresetPanel, temperatureValue, new[] { -10, 0, 25, 35 }, "°C", () =>
+                ExecuteDeviceCommand(device => device.setTECTemperature((int)temperatureValue.Value)));
+            AddPresetButtons(powerPresetPanel, powerValue, new[] { 5, 50, 100, 200, 300, 400, 500 }, "mW", () =>
+                ExecuteDeviceCommand(device => device.setLaserPower((int)powerValue.Value)));
+            AddPresetButtons(pwmPresetPanel, pwmValue, new[] { 700, 1400, 2100, 2800, 3500, 4200, 4800 }, string.Empty, () =>
+                ExecuteDeviceCommand(device => device.setLaserPWM((int)pwmValue.Value)));
+            AddPresetButtons(pwmCorrectPresetPanel, pwmCorrectValue, new[] { 700, 1400, 2100, 2800, 3500, 4200, 4800 }, string.Empty, () =>
+                ExecuteDeviceCommand(device => device.setLaserPWMCorrect((int)pwmCorrectValue.Value)));
+            AddPresetButtons(currentPresetPanel, currentValue, new[]
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1,
-                Padding = new Padding(0, 4, 0, 8)
-            };
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
-            settings.Controls.Add(CreateSwitchAndTemperatureGroup(), 0, 0);
-            settings.Controls.Add(CreatePowerAndCurrentGroup(), 1, 0);
-            root.Controls.Add(settings, 0, 1);
-            root.Controls.Add(CreateStatusGroup(), 0, 2);
+                30, 40, 50, 60, 70, 80, 90, 100, 110, 120,
+                300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200
+            }, "mA", () => ExecuteDeviceCommand(device => device.setLaserCurrent((int)currentValue.Value)));
         }
 
         /// <summary>
-        /// 创建 LD、TEC、全开关、激光周期和 TEC 目标温度控件。
+        /// 执行 AddPresetButtons 相关的内部处理。
         /// </summary>
-        private GroupBox CreateSwitchAndTemperatureGroup()
-        {
-            GroupBox group = new GroupBox { Text = "开关与温控", Dock = DockStyle.Fill, Padding = new Padding(12) };
-            FlowLayoutPanel panel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoScroll = true
-            };
-            group.Controls.Add(panel);
-
-            FlowLayoutPanel switches = CreateHorizontalPanel();
-            switches.Controls.Add(CreateCommandButton("全部开启", async () =>
-                await ExecuteCommandAsync("开启激光器全部状态", () => SetAllOutputs(true))));
-            switches.Controls.Add(CreateCommandButton("全部关闭", async () =>
-                await ExecuteCommandAsync("关闭激光器全部状态", () => SetAllOutputs(false))));
-            ldToggleButton = CreateCommandButton("LD：关", async () =>
-                await ExecuteCommandAsync("切换 LD", () => SetLaserOutput(!LaserOutputEnabled)));
-            tecToggleButton = CreateCommandButton("TEC：关", async () =>
-                await ExecuteCommandAsync("切换 TEC", () => SetTecOutput(!TecEnabled)));
-            switches.Controls.Add(ldToggleButton);
-            switches.Controls.Add(tecToggleButton);
-            panel.Controls.Add(switches);
-
-            periodValue = CreateNumeric(0, 10000, 500);
-            panel.Controls.Add(CreateSettingPanel(
-                "激光开关半周期 (ms)",
-                periodValue,
-                "应用",
-                value => ExecuteDeviceCommand(device => device.setLaserPeriod(value)),
-                new[] { 10, 100, 1000, 10000 }));
-
-            temperatureValue = CreateNumeric(-20, 60, 25);
-            panel.Controls.Add(CreateSettingPanel(
-                "TEC 目标温度 (°C)",
-                temperatureValue,
-                "应用",
-                value => ExecuteDeviceCommand(device => device.setTECTemperature(value)),
-                new[] { -10, 0, 25, 35 }));
-
-            powerRangeLabel = new Label
-            {
-                AutoSize = true,
-                Margin = new Padding(8, 18, 8, 8),
-                ForeColor = Color.DimGray,
-                Text = "激光功率范围：等待设备信息"
-            };
-            panel.Controls.Add(powerRangeLabel);
-            return group;
-        }
-
-        /// <summary>
-        /// 创建激光功率、PWM、PWM 校正和电流设置控件。
-        /// </summary>
-        private GroupBox CreatePowerAndCurrentGroup()
-        {
-            GroupBox group = new GroupBox { Text = "功率与电流", Dock = DockStyle.Fill, Padding = new Padding(12) };
-            FlowLayoutPanel panel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoScroll = true
-            };
-            group.Controls.Add(panel);
-
-            powerValue = CreateNumeric(0, 1000, 100);
-            panel.Controls.Add(CreateSettingPanel(
-                "激光功率 (mW)",
-                powerValue,
-                "设置功率",
-                value => ExecuteDeviceCommand(device => device.setLaserPower(value)),
-                new[] { 5, 50, 100, 200, 300, 400, 500 }));
-
-            pwmValue = CreateNumeric(0, 4800, 3000);
-            panel.Controls.Add(CreateSettingPanel(
-                "激光功率 PWM",
-                pwmValue,
-                "设置 PWM",
-                value => ExecuteDeviceCommand(device => device.setLaserPWM(value)),
-                new[] { 700, 1400, 2100, 2800, 3500, 4200, 4800 }));
-
-            pwmCorrectValue = CreateNumeric(0, 4800, 3000);
-            panel.Controls.Add(CreateSettingPanel(
-                "PWM 功率校正",
-                pwmCorrectValue,
-                "设置校正",
-                value => ExecuteDeviceCommand(device => device.setLaserPWMCorrect(value)),
-                new[] { 700, 1400, 2100, 2800, 3500, 4200, 4800 }));
-
-            currentValue = CreateNumeric(0, 1200, 1000);
-            panel.Controls.Add(CreateSettingPanel(
-                "激光电流 (mA)",
-                currentValue,
-                "设置电流",
-                value => ExecuteDeviceCommand(device => device.setLaserCurrent(value)),
-                new[]
-                {
-                    30, 40, 50, 60, 70,
-                    80, 90, 100, 110, 120,
-                    300, 400, 500, 600, 700,
-                    800, 900, 1000, 1100, 1200
-                }));
-            return group;
-        }
-
-        /// <summary>
-        /// 创建激光器状态读取、自动刷新和原始数据展示区域。
-        /// </summary>
-        private GroupBox CreateStatusGroup()
-        {
-            GroupBox group = new GroupBox { Text = "激光器状态", Dock = DockStyle.Fill, Padding = new Padding(10) };
-            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            group.Controls.Add(layout);
-
-            FlowLayoutPanel actions = CreateHorizontalPanel();
-            Button refreshButton = new Button { Text = "刷新状态", AutoSize = true };
-            refreshButton.Click += async (sender, args) => await RefreshStatusAsync(true);
-            autoRefreshCheckBox = new CheckBox { Text = "自动刷新 (1秒)", Checked = false, AutoSize = true, Margin = new Padding(15, 7, 5, 5) };
-            actions.Controls.Add(refreshButton);
-            actions.Controls.Add(autoRefreshCheckBox);
-            layout.Controls.Add(actions, 0, 0);
-
-            string[] names = { "当前温度", "目标温度", "TEC/mA", "KP", "KI", "KD", "TMPGN", "LD/uA", "Power on" };
-            TableLayoutPanel values = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = names.Length, RowCount = 2 };
-            for (int index = 0; index < names.Length; index++)
-            {
-                values.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F / names.Length));
-                values.Controls.Add(new Label { Text = names[index], Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter }, index, 0);
-                statusValues[index] = new Label
-                {
-                    Text = "--",
-                    Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    BorderStyle = BorderStyle.FixedSingle
-                };
-                values.Controls.Add(statusValues[index], index, 1);
-            }
-            layout.Controls.Add(values, 0, 1);
-
-            rawStatusLabel = new Label { Text = "原始状态：--", Dock = DockStyle.Fill, ForeColor = Color.DimGray };
-            layout.Controls.Add(rawStatusLabel, 0, 2);
-            return group;
-        }
-
-        /// <summary>
-        /// 创建包含标题、数值框、应用按钮和快捷值按钮的设置行。
-        /// </summary>
-        private Control CreateSettingPanel(
-            string title,
+        private void AddPresetButtons(
+            FlowLayoutPanel panel,
             NumericUpDown numeric,
-            string applyText,
-            Func<int, bool> command,
-            int[] presets)
+            int[] values,
+            string suffix,
+            Func<bool> command)
         {
-            FlowLayoutPanel container = new FlowLayoutPanel
+            foreach (int value in values)
             {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                Margin = new Padding(8, 8, 8, 4)
-            };
-            FlowLayoutPanel editor = CreateHorizontalPanel();
-            editor.Controls.Add(new Label { Text = title, AutoSize = true, Margin = new Padding(3, 8, 8, 3) });
-            editor.Controls.Add(numeric);
-            editor.Controls.Add(CreateCommandButton(applyText, async () =>
-                await ExecuteCommandAsync(title, () => command((int)numeric.Value))));
-            container.Controls.Add(editor);
-
-            FlowLayoutPanel presetPanel = CreateHorizontalPanel();
-            foreach (int preset in presets)
-            {
-                Button presetButton = CreateCommandButton(FormatPreset(title, preset), async () =>
+                Button button = new Button
                 {
-                    decimal bounded = Math.Max(numeric.Minimum, Math.Min(numeric.Maximum, preset));
+                    AutoSize = true,
+                    Margin = new Padding(2),
+                    Name = panel.Name + "Preset" + value,
+                    Text = value + suffix,
+                    Tag = value
+                };
+                button.Click += async (sender, args) =>
+                {
+                    decimal bounded = Math.Max(numeric.Minimum, Math.Min(numeric.Maximum, value));
                     numeric.Value = bounded;
-                    await ExecuteCommandAsync(title, () => command((int)bounded));
-                });
-                presetPanel.Controls.Add(presetButton);
+                    await ExecuteCommandAsync(numeric.AccessibleName ?? "应用预设", command);
+                };
+                panel.Controls.Add(button);
+                commandControls.Add(button);
             }
-            container.Controls.Add(presetPanel);
-            return container;
         }
 
         /// <summary>
-        /// 根据设置类型为快捷值添加便于识别的单位。
+        /// 处理 AllOnButton_Click 触发的界面事件。
         /// </summary>
-        private static string FormatPreset(string title, int value)
+        private async void AllOnButton_Click(object sender, EventArgs e)
         {
-            if (title.IndexOf("温度", StringComparison.Ordinal) >= 0)
-                return value + "°C";
-            if (title.IndexOf("半周期", StringComparison.Ordinal) >= 0)
-                return value >= 1000 ? (value / 1000) + "s" : value + "ms";
-            if (title.IndexOf("电流", StringComparison.Ordinal) >= 0)
-                return value + "mA";
-            if (title.IndexOf("(mW)", StringComparison.Ordinal) >= 0)
-                return value + "mW";
-            return value.ToString();
+            await ExecuteCommandAsync("开启激光器全部状态", () => SetAllOutputs(true));
         }
 
         /// <summary>
-        /// 创建统一尺寸并登记到命令禁用列表的按钮。
+        /// 处理 AllOffButton_Click 触发的界面事件。
         /// </summary>
-        private Button CreateCommandButton(string text, Func<Task> action)
+        private async void AllOffButton_Click(object sender, EventArgs e)
         {
-            Button button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(82, 30), Margin = new Padding(4) };
-            button.Click += async (sender, args) => await action();
-            commandControls.Add(button);
-            return button;
+            await ExecuteCommandAsync("关闭激光器全部状态", () => SetAllOutputs(false));
         }
 
         /// <summary>
-        /// 创建横向自动尺寸容器。
+        /// 处理 LdToggleButton_Click 触发的界面事件。
         /// </summary>
-        private static FlowLayoutPanel CreateHorizontalPanel()
+        private async void LdToggleButton_Click(object sender, EventArgs e)
         {
-            return new FlowLayoutPanel
-            {
-                AutoSize = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Margin = new Padding(4)
-            };
+            await ExecuteCommandAsync("切换 LD", () => SetLaserOutput(!LaserOutputEnabled));
         }
 
         /// <summary>
-        /// 创建具有指定范围和默认值的整数输入框。
+        /// 处理 TecToggleButton_Click 触发的界面事件。
         /// </summary>
-        private NumericUpDown CreateNumeric(int minimum, int maximum, int value)
+        private async void TecToggleButton_Click(object sender, EventArgs e)
         {
-            NumericUpDown numeric = new NumericUpDown
-            {
-                Minimum = minimum,
-                Maximum = maximum,
-                Value = value,
-                Width = 90,
-                Margin = new Padding(4)
-            };
-            commandControls.Add(numeric);
-            return numeric;
+            await ExecuteCommandAsync("切换 TEC", () => SetTecOutput(!TecEnabled));
+        }
+
+        /// <summary>
+        /// 处理 ApplyPeriodButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyPeriodButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("激光开关半周期", () => ExecuteDeviceCommand(device => device.setLaserPeriod((int)periodValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 ApplyTemperatureButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyTemperatureButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("TEC 目标温度", () => ExecuteDeviceCommand(device => device.setTECTemperature((int)temperatureValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 ApplyPowerButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyPowerButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("激光功率", () => ExecuteDeviceCommand(device => device.setLaserPower((int)powerValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 ApplyPwmButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyPwmButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("激光功率 PWM", () => ExecuteDeviceCommand(device => device.setLaserPWM((int)pwmValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 ApplyPwmCorrectButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyPwmCorrectButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("PWM 功率校正", () => ExecuteDeviceCommand(device => device.setLaserPWMCorrect((int)pwmCorrectValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 ApplyCurrentButton_Click 触发的界面事件。
+        /// </summary>
+        private async void ApplyCurrentButton_Click(object sender, EventArgs e)
+        {
+            await ExecuteCommandAsync("激光电流", () => ExecuteDeviceCommand(device => device.setLaserCurrent((int)currentValue.Value)));
+        }
+
+        /// <summary>
+        /// 处理 RefreshStatusButton_Click 触发的界面事件。
+        /// </summary>
+        private async void RefreshStatusButton_Click(object sender, EventArgs e)
+        {
+            await RefreshStatusAsync(true);
         }
 
         /// <summary>
@@ -495,6 +354,9 @@ namespace MicroLaman
                 callback(laserOutputEnabled, tecEnabled);
         }
 
+        /// <summary>
+        /// 判断AcceptedCommandResult相关的内部处理。
+        /// </summary>
         private static bool IsAcceptedCommandResult(Terra.Device device, bool success)
         {
             return success || (device != null && device.GetType().FullName == "Terra.Others");
@@ -569,7 +431,9 @@ namespace MicroLaman
             ApplyCommandAvailability();
         }
 
-        /// <summary>同步自动扫描直接切换的 LD 状态，避免设置窗口显示旧状态。</summary>
+        /// <summary>
+        /// 同步自动扫描直接切换的 LD 状态，避免设置窗口显示旧状态。
+        /// </summary>
         internal void SetLaserOutputStateFromScan(bool enabled)
         {
             if (InvokeRequired)
@@ -583,7 +447,9 @@ namespace MicroLaman
             RefreshDeviceState();
         }
 
-        /// <summary>同步自动扫描直接切换的 TEC 状态，避免设置窗口显示旧状态。</summary>
+        /// <summary>
+        /// 同步自动扫描直接切换的 TEC 状态，避免设置窗口显示旧状态。
+        /// </summary>
         internal void SetTecOutputStateFromScan(bool enabled)
         {
             if (InvokeRequired)
@@ -707,16 +573,6 @@ namespace MicroLaman
             base.OnFormClosed(e);
         }
 
-        private void InitializeComponent()
-        {
-            this.SuspendLayout();
-            // 
-            // LaserSettingsForm
-            // 
-            this.ClientSize = new System.Drawing.Size(1374, 847);
-            this.Name = "LaserSettingsForm";
-            this.ResumeLayout(false);
-
-        }
     }
 }
+

@@ -3,7 +3,7 @@ using System.IO.Ports;
 using System.Text;
 using System.Threading;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 提供线程安全的 TANGO 串口生命周期和一问一答通信。

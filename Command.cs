@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Globalization;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 封装扫描平台使用到的 TANGO 文本指令及返回值解析。

@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// 保存并绘制与相机帧合成的框选区域、扫描网格和已访问点。
@@ -108,7 +108,9 @@ namespace MicroLaman
             DrawRecordedScanPoints(graphics, clientSize, recordedPoints);
         }
 
-        /// <summary>绘制已缓存的框线与完整黄色网格，只有尺寸或点数改变时才重新生成。</summary>
+        /// <summary>
+        /// 绘制已缓存的框线与完整黄色网格，只有尺寸或点数改变时才重新生成。
+        /// </summary>
         private void DrawStaticLayer(Graphics graphics, Rectangle rectangle, int xCount, int yCount)
         {
             Bitmap layer;
@@ -124,14 +126,18 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>释放缓存的完整网格位图。</summary>
+        /// <summary>
+        /// 释放缓存的完整网格位图。
+        /// </summary>
         internal void Dispose()
         {
             lock (stateSync)
                 InvalidateStaticLayer();
         }
 
-        /// <summary>创建包含完整边框和全部黄色目标点的透明缓存图层。</summary>
+        /// <summary>
+        /// 创建包含完整边框和全部黄色目标点的透明缓存图层。
+        /// </summary>
         private void CreateStaticLayer(Size size, int xCount, int yCount)
         {
             InvalidateStaticLayer();
@@ -168,7 +174,9 @@ namespace MicroLaman
             }
         }
 
-        /// <summary>释放过期的静态网格缓存。</summary>
+        /// <summary>
+        /// 释放过期的静态网格缓存。
+        /// </summary>
         private void InvalidateStaticLayer()
         {
             if (staticLayer != null)
@@ -203,3 +211,4 @@ namespace MicroLaman
         }
     }
 }
+

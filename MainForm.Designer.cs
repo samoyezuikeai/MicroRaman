@@ -1,5 +1,5 @@
-﻿
-namespace MicroLaman
+
+namespace MicroRaman
 {
     partial class MainForm
     {
@@ -24,8 +24,7 @@ namespace MicroLaman
         #region Windows 窗体设计器生成的代码
 
         /// <summary>
-        /// 设计器支持所需的方法 - 不要修改
-        /// 使用代码编辑器修改此方法的内容。
+        /// 设计器支持所需的方法 - 不要修改 使用代码编辑器修改此方法的内容。
         /// </summary>
         private void InitializeComponent()
         {
@@ -42,10 +41,9 @@ namespace MicroLaman
             this.RamanMapping = new System.Windows.Forms.ToolStripButton();
             this.panel1 = new System.Windows.Forms.Panel();
             this.mappingReferenceGroupBox = new System.Windows.Forms.GroupBox();
-            this.mappingAutomaticRadioButton = new System.Windows.Forms.RadioButton();
+            this.mappingPcaRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingFullSpectrumRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingReferenceHintLabel = new System.Windows.Forms.Label();
-            this.mappingPcaRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingPeakWidthRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingPeakPositionRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingPeakAreaRadioButton = new System.Windows.Forms.RadioButton();
@@ -60,7 +58,7 @@ namespace MicroLaman
             this.formsPlot1 = new ScottPlot.WinForms.FormsPlot();
             this.scanWorkspace = new System.Windows.Forms.TableLayoutPanel();
             this.scanMatrixGroupBox = new System.Windows.Forms.GroupBox();
-            this.scanMatrixPreviewControl = new MicroLaman.ScanMatrixPreviewControl();
+            this.scanMatrixPreviewControl = new MicroRaman.ScanMatrixPreviewControl();
             this.brightFieldGroupBox = new System.Windows.Forms.GroupBox();
             this.brightFieldPreviewStatusLabel = new System.Windows.Forms.Label();
             this.brightFieldPreviewPictureBox = new System.Windows.Forms.PictureBox();
@@ -68,7 +66,6 @@ namespace MicroLaman
             this.panel1.SuspendLayout();
             this.mappingReferenceGroupBox.SuspendLayout();
             this.scanWorkspace.SuspendLayout();
-            this.scanMatrixGroupBox.SuspendLayout();
             this.brightFieldGroupBox.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.brightFieldPreviewPictureBox)).BeginInit();
             this.SuspendLayout();
@@ -159,22 +156,23 @@ namespace MicroLaman
             this.CalibrateStage.Size = new System.Drawing.Size(56, 56);
             this.CalibrateStage.ToolTipText = "在关闭激光、打开明场照明后计算像素与平台坐标比例";
             this.CalibrateStage.Click += new System.EventHandler(this.CalibrateStage_Click);
-            //
+            // 
             // RealtimeSpectrum
-            //
+            // 
             this.RealtimeSpectrum.AutoSize = false;
             this.RealtimeSpectrum.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.RealtimeSpectrum.Enabled = false;
             this.RealtimeSpectrum.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.RealtimeSpectrum.Image = ((System.Drawing.Image)(resources.GetObject("RealtimeSpectrum.Image")));
             this.RealtimeSpectrum.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.RealtimeSpectrum.Name = "RealtimeSpectrum";
-            this.RealtimeSpectrum.Size = new System.Drawing.Size(104, 56);
+            this.RealtimeSpectrum.Size = new System.Drawing.Size(56, 56);
             this.RealtimeSpectrum.Text = "实时光谱";
             this.RealtimeSpectrum.ToolTipText = "开始或停止实时读取光谱仪；停止时清空波形图";
             this.RealtimeSpectrum.Click += new System.EventHandler(this.RealtimeSpectrum_Click);
-            //
+            // 
             // ScanSelection
-            //
+            // 
             this.ScanSelection.AutoSize = false;
             this.ScanSelection.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.ScanSelection.Image = ((System.Drawing.Image)(resources.GetObject("ScanSelection.Image")));
@@ -184,20 +182,21 @@ namespace MicroLaman
             this.ScanSelection.Size = new System.Drawing.Size(56, 56);
             this.ScanSelection.ToolTipText = "按蛇形顺序遍历框选区域内的全部网格点";
             this.ScanSelection.Click += new System.EventHandler(this.ScanSelection_Click);
-            //
+            // 
             // RamanMapping
-            //
+            // 
             this.RamanMapping.AutoSize = false;
             this.RamanMapping.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.RamanMapping.Enabled = false;
             this.RamanMapping.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.RamanMapping.Image = ((System.Drawing.Image)(resources.GetObject("RamanMapping.Image")));
             this.RamanMapping.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.RamanMapping.Name = "RamanMapping";
-            this.RamanMapping.Size = new System.Drawing.Size(126, 56);
+            this.RamanMapping.Size = new System.Drawing.Size(56, 56);
             this.RamanMapping.Text = "拉曼 Mapping";
             this.RamanMapping.ToolTipText = "扫描全部完成后，根据各点保存的整条光谱生成伪彩图";
             this.RamanMapping.Click += new System.EventHandler(this.RamanMapping_Click);
-            //
+            // 
             // panel1
             // 
             this.panel1.BackColor = System.Drawing.Color.White;
@@ -219,9 +218,9 @@ namespace MicroLaman
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(402, 1270);
             this.panel1.TabIndex = 5;
-            //
+            // 
             // mappingReferenceGroupBox
-            //
+            // 
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPcaRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingFullSpectrumRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingReferenceHintLabel);
@@ -229,7 +228,6 @@ namespace MicroLaman
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakPositionRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakAreaRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPeakHeightRadioButton);
-            this.mappingReferenceGroupBox.Controls.Add(this.mappingAutomaticRadioButton);
             this.mappingReferenceGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
             this.mappingReferenceGroupBox.Location = new System.Drawing.Point(20, 494);
             this.mappingReferenceGroupBox.Name = "mappingReferenceGroupBox";
@@ -237,90 +235,78 @@ namespace MicroLaman
             this.mappingReferenceGroupBox.TabIndex = 12;
             this.mappingReferenceGroupBox.TabStop = false;
             this.mappingReferenceGroupBox.Text = "Mapping 参考指标";
-            //
-            //
-            // mappingAutomaticRadioButton
-            //
-            this.mappingAutomaticRadioButton.AutoSize = true;
-            this.mappingAutomaticRadioButton.Checked = true;
-            this.mappingAutomaticRadioButton.Location = new System.Drawing.Point(18, 40);
-            this.mappingAutomaticRadioButton.Name = "mappingAutomaticRadioButton";
-            this.mappingAutomaticRadioButton.Size = new System.Drawing.Size(137, 35);
-            this.mappingAutomaticRadioButton.TabIndex = 0;
-            this.mappingAutomaticRadioButton.TabStop = true;
-            this.mappingAutomaticRadioButton.Text = "自动推荐";
-            this.mappingAutomaticRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingPcaRadioButton
-            //
+            // 
             this.mappingPcaRadioButton.AutoSize = true;
-            this.mappingPcaRadioButton.Location = new System.Drawing.Point(18, 328);
+            this.mappingPcaRadioButton.Location = new System.Drawing.Point(18, 280);
             this.mappingPcaRadioButton.Name = "mappingPcaRadioButton";
-            this.mappingPcaRadioButton.Size = new System.Drawing.Size(199, 35);
+            this.mappingPcaRadioButton.Size = new System.Drawing.Size(196, 35);
             this.mappingPcaRadioButton.TabIndex = 6;
             this.mappingPcaRadioButton.Text = "PCA 全谱异常";
             this.mappingPcaRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingFullSpectrumRadioButton
-            //
+            // 
             this.mappingFullSpectrumRadioButton.AutoSize = true;
-            this.mappingFullSpectrumRadioButton.Location = new System.Drawing.Point(18, 280);
+            this.mappingFullSpectrumRadioButton.Location = new System.Drawing.Point(18, 232);
             this.mappingFullSpectrumRadioButton.Name = "mappingFullSpectrumRadioButton";
-            this.mappingFullSpectrumRadioButton.Size = new System.Drawing.Size(248, 35);
+            this.mappingFullSpectrumRadioButton.Size = new System.Drawing.Size(237, 35);
             this.mappingFullSpectrumRadioButton.TabIndex = 5;
             this.mappingFullSpectrumRadioButton.Text = "全谱差异（荧光）";
             this.mappingFullSpectrumRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingReferenceHintLabel
-            //
-            this.mappingReferenceHintLabel.AutoSize = false;
+            // 
             this.mappingReferenceHintLabel.ForeColor = System.Drawing.Color.DimGray;
-            this.mappingReferenceHintLabel.Location = new System.Drawing.Point(18, 376);
+            this.mappingReferenceHintLabel.Location = new System.Drawing.Point(18, 328);
             this.mappingReferenceHintLabel.Name = "mappingReferenceHintLabel";
             this.mappingReferenceHintLabel.Size = new System.Drawing.Size(304, 43);
             this.mappingReferenceHintLabel.TabIndex = 7;
-            this.mappingReferenceHintLabel.Text = "自动推荐会比较全部标准后选择；全谱差异适合荧光或未知样品。";
-            //
+            this.mappingReferenceHintLabel.Text = "请按实验目的手动选择指标；全谱差异适合荧光或未知样品。";
+            // 
             // mappingPeakWidthRadioButton
-            //
+            // 
             this.mappingPeakWidthRadioButton.AutoSize = true;
-            this.mappingPeakWidthRadioButton.Location = new System.Drawing.Point(18, 232);
+            this.mappingPeakWidthRadioButton.Location = new System.Drawing.Point(18, 184);
             this.mappingPeakWidthRadioButton.Name = "mappingPeakWidthRadioButton";
-            this.mappingPeakWidthRadioButton.Size = new System.Drawing.Size(205, 35);
+            this.mappingPeakWidthRadioButton.Size = new System.Drawing.Size(203, 35);
             this.mappingPeakWidthRadioButton.TabIndex = 4;
             this.mappingPeakWidthRadioButton.Text = "半高宽 FWHM";
             this.mappingPeakWidthRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingPeakPositionRadioButton
-            //
+            // 
             this.mappingPeakPositionRadioButton.AutoSize = true;
-            this.mappingPeakPositionRadioButton.Location = new System.Drawing.Point(18, 184);
+            this.mappingPeakPositionRadioButton.Location = new System.Drawing.Point(18, 136);
             this.mappingPeakPositionRadioButton.Name = "mappingPeakPositionRadioButton";
-            this.mappingPeakPositionRadioButton.Size = new System.Drawing.Size(137, 35);
+            this.mappingPeakPositionRadioButton.Size = new System.Drawing.Size(117, 35);
             this.mappingPeakPositionRadioButton.TabIndex = 3;
             this.mappingPeakPositionRadioButton.Text = "峰位置";
             this.mappingPeakPositionRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingPeakAreaRadioButton
-            //
+            // 
             this.mappingPeakAreaRadioButton.AutoSize = true;
-            this.mappingPeakAreaRadioButton.Location = new System.Drawing.Point(18, 136);
+            this.mappingPeakAreaRadioButton.Location = new System.Drawing.Point(18, 88);
             this.mappingPeakAreaRadioButton.Name = "mappingPeakAreaRadioButton";
-            this.mappingPeakAreaRadioButton.Size = new System.Drawing.Size(137, 35);
+            this.mappingPeakAreaRadioButton.Size = new System.Drawing.Size(117, 35);
             this.mappingPeakAreaRadioButton.TabIndex = 2;
             this.mappingPeakAreaRadioButton.Text = "峰面积";
             this.mappingPeakAreaRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // mappingPeakHeightRadioButton
-            //
+            // 
             this.mappingPeakHeightRadioButton.AutoSize = true;
-            this.mappingPeakHeightRadioButton.Location = new System.Drawing.Point(18, 88);
+            this.mappingPeakHeightRadioButton.Checked = true;
+            this.mappingPeakHeightRadioButton.Location = new System.Drawing.Point(18, 40);
             this.mappingPeakHeightRadioButton.Name = "mappingPeakHeightRadioButton";
             this.mappingPeakHeightRadioButton.Size = new System.Drawing.Size(189, 35);
             this.mappingPeakHeightRadioButton.TabIndex = 1;
+            this.mappingPeakHeightRadioButton.TabStop = true;
             this.mappingPeakHeightRadioButton.Text = "峰高（强度）";
             this.mappingPeakHeightRadioButton.UseVisualStyleBackColor = true;
-            //
+            // 
             // integrationRangeLabel
             // 
             this.integrationRangeLabel.AutoSize = true;
@@ -367,9 +353,9 @@ namespace MicroLaman
             this.integrationTimeLabel.Size = new System.Drawing.Size(214, 35);
             this.integrationTimeLabel.TabIndex = 8;
             this.integrationTimeLabel.Text = "积分时间 (ms)：";
-            //
+            // 
             // LaserSettings
-            //
+            // 
             this.LaserSettings.Enabled = false;
             this.LaserSettings.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.LaserSettings.Location = new System.Drawing.Point(20, 251);
@@ -498,7 +484,7 @@ namespace MicroLaman
             this.Controls.Add(this.toolStrip1);
             this.Margin = new System.Windows.Forms.Padding(6);
             this.Name = "MainForm";
-            this.Text = "MicroLaman";
+            this.Text = "MicroRaman";
             this.toolStrip1.ResumeLayout(false);
             this.toolStrip1.PerformLayout();
             this.panel1.ResumeLayout(false);
@@ -506,7 +492,6 @@ namespace MicroLaman
             this.mappingReferenceGroupBox.ResumeLayout(false);
             this.mappingReferenceGroupBox.PerformLayout();
             this.scanWorkspace.ResumeLayout(false);
-            this.scanMatrixGroupBox.ResumeLayout(false);
             this.brightFieldGroupBox.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.brightFieldPreviewPictureBox)).EndInit();
             this.ResumeLayout(false);
@@ -527,7 +512,6 @@ namespace MicroLaman
         private System.Windows.Forms.ToolStripButton RamanMapping;
         private System.Windows.Forms.Panel panel1;
         private System.Windows.Forms.GroupBox mappingReferenceGroupBox;
-        private System.Windows.Forms.RadioButton mappingAutomaticRadioButton;
         private System.Windows.Forms.RadioButton mappingFullSpectrumRadioButton;
         private System.Windows.Forms.Label mappingReferenceHintLabel;
         private System.Windows.Forms.RadioButton mappingPcaRadioButton;
@@ -545,7 +529,7 @@ namespace MicroLaman
         private System.Windows.Forms.Label integrationRangeLabel;
         private System.Windows.Forms.TableLayoutPanel scanWorkspace;
         private System.Windows.Forms.GroupBox scanMatrixGroupBox;
-        private MicroLaman.ScanMatrixPreviewControl scanMatrixPreviewControl;
+        private MicroRaman.ScanMatrixPreviewControl scanMatrixPreviewControl;
         private System.Windows.Forms.GroupBox brightFieldGroupBox;
         private System.Windows.Forms.PictureBox brightFieldPreviewPictureBox;
         private System.Windows.Forms.Label brightFieldPreviewStatusLabel;

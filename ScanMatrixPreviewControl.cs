@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace MicroLaman
+namespace MicroRaman
 {
-    /// <summary>按 CameraShow 框选区域的比例显示完整 X×Y 扫描矩阵，不显示平台坐标。</summary>
+    /// <summary>
+    /// 按 CameraShow 框选区域的比例显示完整 X×Y 扫描矩阵，不显示平台坐标。
+    /// </summary>
     internal sealed class ScanMatrixPreviewControl : Control
     {
         private sealed class ScanPoint
@@ -25,9 +27,14 @@ namespace MicroLaman
         private int hoveredScanIndex = -1;
         private int selectedScanIndex = -1;
 
-        /// <summary>用户点击扫描矩阵中的一个点。</summary>
+        /// <summary>
+        /// 用户点击扫描矩阵中的一个点。
+        /// </summary>
         internal event EventHandler<ScanPointSelectedEventArgs> ScanPointSelected;
 
+        /// <summary>
+        /// 执行 ScanMatrixPreviewControl 相关的内部处理。
+        /// </summary>
         internal ScanMatrixPreviewControl()
         {
             DoubleBuffered = true;
@@ -35,7 +42,9 @@ namespace MicroLaman
             ResizeRedraw = true;
         }
 
-        /// <summary>按 CameraShow 框选的实际宽高比显示网格；仅允许整体等比缩放。</summary>
+        /// <summary>
+        /// 按 CameraShow 框选的实际宽高比显示网格；仅允许整体等比缩放。
+        /// </summary>
         internal void SetScanGrid(IList<PointF> points, float cameraSelectionAspectRatio)
         {
             if (points == null || points.Count == 0)
@@ -80,6 +89,9 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>
+        /// 设置Status相关的内部处理。
+        /// </summary>
         private void SetStatus(string text)
         {
             columnCount = 0;
@@ -93,7 +105,9 @@ namespace MicroLaman
             Invalidate();
         }
 
-        /// <summary>把已完成开激光采谱的点标记为可点击回看。</summary>
+        /// <summary>
+        /// 把已完成开激光采谱的点标记为可点击回看。
+        /// </summary>
         internal void SetSpectrumAvailable(int scanIndex)
         {
             if (scanIndex < 0 || scanIndex >= scanPoints.Count)
@@ -102,7 +116,9 @@ namespace MicroLaman
             Invalidate();
         }
 
-        /// <summary>批量标记后台扫描刚完成的点，只触发一次重绘。</summary>
+        /// <summary>
+        /// 批量标记后台扫描刚完成的点，只触发一次重绘。
+        /// </summary>
         internal void SetSpectraAvailable(IEnumerable<int> scanIndexes)
         {
             if (scanIndexes == null)
@@ -117,7 +133,9 @@ namespace MicroLaman
                 Invalidate();
         }
 
-        /// <summary>保留当前网格，但清除上一轮扫描的已保存光谱和选中状态。</summary>
+        /// <summary>
+        /// 保留当前网格，但清除上一轮扫描的已保存光谱和选中状态。
+        /// </summary>
         internal void ClearSpectrumAvailability()
         {
             spectrumAvailableIndexes.Clear();
@@ -128,7 +146,9 @@ namespace MicroLaman
             Invalidate();
         }
 
-        /// <summary>显示每个扫描点的拉曼 Mapping 伪彩色；颜色区域由相邻点中心的中点分隔。</summary>
+        /// <summary>
+        /// 显示每个扫描点的拉曼 Mapping 伪彩色；颜色区域由相邻点中心的中点分隔。
+        /// </summary>
         internal void SetMappingColors(IDictionary<int, Color> colors)
         {
             mappingColors.Clear();
@@ -143,6 +163,9 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>
+        /// 清空MappingColors相关的内部处理。
+        /// </summary>
         internal void ClearMappingColors()
         {
             if (mappingColors.Count == 0)
@@ -151,6 +174,9 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>
+        /// 处理Paint相关的内部处理。
+        /// </summary>
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -220,6 +246,9 @@ namespace MicroLaman
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
+        /// <summary>
+        /// 绘制MappingCells相关的内部处理。
+        /// </summary>
         private void DrawMappingCells(Graphics graphics, Rectangle gridBounds)
         {
             if (mappingColors.Count == 0)
@@ -237,8 +266,7 @@ namespace MicroLaman
         }
 
         /// <summary>
-        /// 点的颜色延伸到相邻点连线的中点：内部点覆盖四个相邻大格子的各四分之一，
-        /// 边缘点则裁剪到框选矩形边界。
+        /// 点的颜色延伸到相邻点连线的中点：内部点覆盖四个相邻大格子的各四分之一， 边缘点则裁剪到框选矩形边界。
         /// </summary>
         private RectangleF GetMappingCellBounds(Rectangle gridBounds, ScanPoint scanPoint)
         {
@@ -259,6 +287,9 @@ namespace MicroLaman
             return RectangleF.FromLTRB(left, top, right, bottom);
         }
 
+        /// <summary>
+        /// 获取ColumnCenter相关的内部处理。
+        /// </summary>
         private float GetColumnCenter(Rectangle gridBounds, int column)
         {
             return columnCount == 1
@@ -266,6 +297,9 @@ namespace MicroLaman
                 : gridBounds.Left + gridBounds.Width * column / (float)(columnCount - 1);
         }
 
+        /// <summary>
+        /// 获取RowCenter相关的内部处理。
+        /// </summary>
         private float GetRowCenter(Rectangle gridBounds, int row)
         {
             return rowCount == 1
@@ -273,6 +307,9 @@ namespace MicroLaman
                 : gridBounds.Top + gridBounds.Height * row / (float)(rowCount - 1);
         }
 
+        /// <summary>
+        /// 执行 AddDistinct 相关的内部处理。
+        /// </summary>
         private static void AddDistinct(List<float> values, float value)
         {
             foreach (float existing in values)
@@ -281,6 +318,9 @@ namespace MicroLaman
             values.Add(value);
         }
 
+        /// <summary>
+        /// 获取DistinctIndex相关的内部处理。
+        /// </summary>
         private static int GetDistinctIndex(List<float> values, float value)
         {
             for (int index = 0; index < values.Count; index++)
@@ -289,6 +329,9 @@ namespace MicroLaman
             return -1;
         }
 
+        /// <summary>
+        /// 尝试GetGridBounds相关的内部处理。
+        /// </summary>
         private bool TryGetGridBounds(out Rectangle gridBounds)
         {
             const int leftMargin = 50;
@@ -312,6 +355,9 @@ namespace MicroLaman
             return true;
         }
 
+        /// <summary>
+        /// 获取PointLocation相关的内部处理。
+        /// </summary>
         private PointF GetPointLocation(Rectangle gridBounds, ScanPoint scanPoint)
         {
             return new PointF(
@@ -319,6 +365,9 @@ namespace MicroLaman
                 GetRowCenter(gridBounds, scanPoint.Row));
         }
 
+        /// <summary>
+        /// 处理MouseMove相关的内部处理。
+        /// </summary>
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
@@ -332,6 +381,9 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>
+        /// 处理MouseLeave相关的内部处理。
+        /// </summary>
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
@@ -342,6 +394,9 @@ namespace MicroLaman
             Invalidate();
         }
 
+        /// <summary>
+        /// 处理MouseClick相关的内部处理。
+        /// </summary>
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
@@ -357,6 +412,9 @@ namespace MicroLaman
                 handler(this, new ScanPointSelectedEventArgs(scanIndex));
         }
 
+        /// <summary>
+        /// 执行 HitTest 相关的内部处理。
+        /// </summary>
         private int HitTest(Point location)
         {
             if (scanPoints.Count == 0)
@@ -379,9 +437,14 @@ namespace MicroLaman
         }
     }
 
-    /// <summary>扫描矩阵中被点击的点的蛇形路径序号。</summary>
+    /// <summary>
+    /// 扫描矩阵中被点击的点的蛇形路径序号。
+    /// </summary>
     internal sealed class ScanPointSelectedEventArgs : EventArgs
     {
+        /// <summary>
+        /// 执行 ScanPointSelectedEventArgs 相关的内部处理。
+        /// </summary>
         internal ScanPointSelectedEventArgs(int scanIndex)
         {
             ScanIndex = scanIndex;
@@ -390,3 +453,4 @@ namespace MicroLaman
         internal int ScanIndex { get; private set; }
     }
 }
+

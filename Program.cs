@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Windows.Forms;
 
-namespace MicroLaman
+namespace MicroRaman
 {
     /// <summary>
     /// WinForms 应用程序入口。
