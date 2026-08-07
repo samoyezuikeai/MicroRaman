@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Management;
@@ -26,6 +27,16 @@ namespace MicroRaman
         private static readonly TimeSpan ScanDoubleClickGuard = TimeSpan.FromMilliseconds(800);
         // Raman mapping 默认采用 1000 ms 积分；用户可在主窗口中修改并应用。
         private const double DefaultSpectrometerIntegrationTimeMilliseconds = 1000.0;
+        // 每一帧至少保留 200 ms 的完整状态稳定窗口；较长积分不再叠加固定等待。
+        private const int MinimumSpectrumFrameDurationMilliseconds = 200;
+        // 短积分实测中，LD 开启 600 ms 后的扫描峰仍只有连续输出时的约 40%。
+        // 有效第二帧开始积分前累计开光至少 2 s；丢弃首帧的时间计入，不给长积分重复加等待。
+        private const int LaserOutputStabilizationMilliseconds = 2000;
+        // 新连接的激光器始终先写入保守输出参数；扫描过程中不会再改写这些参数。
+        private const int DefaultLaserPowerMilliwatts = 50;
+        private const int DefaultLaserPwm = 1400;
+        private const int DefaultLaserPwmCorrection = 1400;
+        private const int DefaultLaserCurrentMilliamps = 800;
         private readonly StageScanController stageScanController = new StageScanController();
         private readonly object laserDeviceSync = new object();
         private readonly object spectrometerDeviceSync = new object();
@@ -53,6 +64,19 @@ namespace MicroRaman
         private double[] scanDarkSpectrum;
         private bool laserEnabled;
         private bool tecEnabled;
+        private double[] displayedRamanShifts;
+        private double[] displayedSpectrumIntensities;
+        private double? spectrumCursorX;
+        private ScottPlot.Plottables.VerticalLine spectrumCursorLine;
+        private Label spectrumCursorCoordinateLabel;
+        private bool spectrumCursorDragging;
+        private bool spectrumPlotWasDragged;
+        private Point spectrumMouseDownLocation;
+        private bool spectrumAxesNeedAutoScale = true;
+        private bool mappingSignConfigured;
+        private RamanMappingMode configuredMappingMode = RamanMappingMode.PeakHeight;
+        private readonly List<RamanPeakRange> configuredMappingPeakRanges =
+            new List<RamanPeakRange>();
 
         /// <summary>
         /// 用于回看单个扫描点的开激光后拉曼数据。
@@ -80,6 +104,7 @@ namespace MicroRaman
             InitializeComponent();
             spectrometerIntegrationTimeTextBox.Text = FormatIntegrationTime(DefaultSpectrometerIntegrationTimeMilliseconds);
             InitializeSpectrumPlot();
+            InitializeSpectrumCursor();
             scanMatrixPreviewControl.ScanPointSelected += ScanMatrixPreviewControl_ScanPointSelected;
             // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
@@ -204,6 +229,7 @@ namespace MicroRaman
                         maximumIntegrationTime);
                     connectedLaser.setLDOff();
                     connectedLaser.setTECOff();
+                    ApplySafeDefaultLaserParameters(connectedLaser);
                     laserDevice = connectedLaser;
                     spectrometerDevice = connectedSpectrometer;
                     spectrometerMinimumIntegrationTimeMilliseconds = minimumIntegrationTime;
@@ -234,6 +260,24 @@ namespace MicroRaman
         }
 
         /// <summary>
+        /// 在 LD 和 TEC 均关闭时写入保守的默认激光参数。
+        /// 这一步只发生在设备连接时，扫描期间仅切换 LD，不会让每个点的输出参数发生跳变。
+        /// </summary>
+        private static void ApplySafeDefaultLaserParameters(Terra.Device device)
+        {
+            if (device == null)
+                throw new ArgumentNullException(nameof(device));
+
+            bool powerWritten = device.setLaserPower(DefaultLaserPowerMilliwatts);
+            bool pwmWritten = device.setLaserPWM(DefaultLaserPwm);
+            bool correctionWritten = device.setLaserPWMCorrect(DefaultLaserPwmCorrection);
+            bool currentWritten = device.setLaserCurrent(DefaultLaserCurrentMilliamps);
+            if ((!powerWritten || !pwmWritten || !correctionWritten || !currentWritten)
+                && !IsThbdLaser(device))
+                throw new InvalidOperationException("未能写入默认安全激光参数，已停止连接以避免在未知输出下扫描。");
+        }
+
+        /// <summary>
         /// 打开非模态激光器设置窗口；窗口打开后主窗口仍可继续操作。
         /// </summary>
         private void LaserSettings_Click(object sender, EventArgs e)
@@ -253,7 +297,10 @@ namespace MicroRaman
                     laserEnabled,
                     tecEnabled);
                 laserSettingsForm.FormClosed += LaserSettingsForm_FormClosed;
-                laserSettingsForm.Show(this);
+                // Keep tool windows independent: an owned form is permanently forced
+                // above its owner, which prevents the user from bringing MainForm forward.
+                laserSettingsForm.Show();
+                laserSettingsForm.Activate();
                 return;
             }
 
@@ -365,39 +412,115 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// 强制从当前 LD 状态重新开始一次积分，避免读取到开关切换前的缓存帧。 不支持 reset 采集的设备会停止旧积分后回退到普通同步采谱。
+        /// 从当前 LD 状态连续完成两帧采集：第一帧仅用于冲掉切换前缓存并等待硬件稳定，
+        /// 第二帧才作为有效结果。每一帧不足 200 ms 时补足等待，长积分不额外延迟。
+        /// 不支持 reset 采集的设备会停止旧积分后回退到普通同步采谱。
         /// </summary>
         private static double[] AcquireFreshSpectrum(Terra.Device device)
         {
+            // Reset the stream once, then deliberately discard the first complete frame.
+            try { device.stopSpectrum(); } catch { }
+            try { device.clearFrameBuffer(); } catch { }
+
             try
             {
-                double[] resetSpectrum = device.getResetSpectrum();
-                if (resetSpectrum != null && resetSpectrum.Length > 1)
-                    return resetSpectrum;
+                AcquireResetSpectrumFrame(device);
             }
             catch
             {
-                // 部分旧固件没有实现 reset 采集，下面使用 stop + getSpectrum 兼容。
+                // 部分旧固件没有实现 reset 采集，使用 stop + getSpectrum 取得要丢弃的首帧。
+                try { device.stopSpectrum(); } catch { }
+                try { device.clearFrameBuffer(); } catch { }
+                AcquireStableSpectrum(device);
             }
 
-            try { device.stopSpectrum(); } catch { }
+            // Do not stop or clear between frames: this must be the next frame under the same LD state.
             return AcquireStableSpectrum(device);
         }
 
         /// <summary>
-        /// 执行 AcquireStableSpectrum 相关的内部处理。
+        /// 使用 reset 强制开始首帧，并保证该帧过程不少于 200 ms。
+        /// </summary>
+        private static double[] AcquireResetSpectrumFrame(Terra.Device device)
+        {
+            Stopwatch frameTimer = Stopwatch.StartNew();
+            try
+            {
+                double[] spectrum = device.getResetSpectrum();
+                if (spectrum != null && spectrum.Length > 1)
+                    return spectrum;
+                throw new InvalidOperationException("光谱仪 reset 采集未返回有效首帧。");
+            }
+            finally
+            {
+                CompleteMinimumSpectrumFrameDuration(frameTimer);
+            }
+        }
+
+        /// <summary>
+        /// 同步读取一帧；无效返回最多重试三次，整个帧过程保证不少于 200 ms。
         /// </summary>
         private static double[] AcquireStableSpectrum(Terra.Device device)
         {
-            for (int attempt = 0; attempt < 3; attempt++)
+            Stopwatch frameTimer = Stopwatch.StartNew();
+            try
             {
-                double[] spectrum = device.getSpectrum();
-                if (spectrum != null && spectrum.Length > 1)
-                    return spectrum;
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    double[] spectrum = device.getSpectrum();
+                    if (IsUsableSpectrumFrame(device, spectrum))
+                        return spectrum;
+                }
+
+                throw new InvalidOperationException(
+                    "光谱仪连续返回无效或饱和光谱，采集已安全停止。请降低积分时间或激光功率；若仍异常，请重新连接光谱仪。");
+            }
+            finally
+            {
+                CompleteMinimumSpectrumFrameDuration(frameTimer);
+            }
+        }
+
+        /// <summary>
+        /// 同时采用 SDK 状态与逐点数值检查，阻止饱和、全零或非有限数据进入后续分析。
+        /// </summary>
+        private static bool IsUsableSpectrumFrame(Terra.Device device, double[] spectrum)
+        {
+            if (spectrum == null || spectrum.Length <= 1)
+                return false;
+
+            try
+            {
+                if (!device.isSpectrumValid() || device.isSaturatedForCurrentSpectrum())
+                    return false;
+            }
+            catch
+            {
+                // 旧固件可能不实现状态查询；此时仍执行下面的数据完整性检查。
             }
 
-            throw new InvalidOperationException(
-                "光谱仪未返回有效光谱，扫描已安全停止。请重新插拔光谱仪USB或者重启程序。");
+            bool hasNonZeroValue = false;
+            for (int index = 0; index < spectrum.Length; index++)
+            {
+                double value = spectrum[index];
+                if (double.IsNaN(value) || double.IsInfinity(value))
+                    return false;
+                if (Math.Abs(value) > 1e-12)
+                    hasNonZeroValue = true;
+            }
+            return hasNonZeroValue;
+        }
+
+        /// <summary>
+        /// SDK 返回过快时补足单帧最短过程时间，避免短积分下紧邻激光切换采样。
+        /// </summary>
+        private static void CompleteMinimumSpectrumFrameDuration(Stopwatch frameTimer)
+        {
+            frameTimer.Stop();
+            int remainingMilliseconds = MinimumSpectrumFrameDurationMilliseconds
+                - (int)frameTimer.ElapsedMilliseconds;
+            if (remainingMilliseconds > 0)
+                Thread.Sleep(remainingMilliseconds);
         }
 
         /// <summary>
@@ -461,7 +584,8 @@ namespace MicroRaman
             double[] corrected = new double[signal.Length];
             for (int index = 0; index < corrected.Length; index++)
                 corrected[index] = signal[index] - darkSpectrum[index];
-            double[] smoothed = SmoothMovingAverage(corrected, 5);
+            double[] despiked = RamanMappingAnalyzer.RemoveCosmicRaySpikes(corrected);
+            double[] smoothed = SmoothMovingAverage(despiked, 5);
             // 与商业 Raman 软件的处理顺序一致：暗谱扣除后再消除缓慢变化的荧光/暗电流基线。
             return RamanMappingAnalyzer.RemoveBaseline(smoothed);
         }
@@ -483,15 +607,6 @@ namespace MicroRaman
                 smoothed[index] = total / (end - start + 1);
             }
             return smoothed;
-        }
-
-        /// <summary>
-        /// 判断SavedDarkSpectrum相关的内部处理。
-        /// </summary>
-        private bool HasSavedDarkSpectrum()
-        {
-            lock (darkSpectrumSync)
-                return savedDarkSpectrum != null && savedDarkSpectrum.Length > 1;
         }
 
         /// <summary>
@@ -717,7 +832,7 @@ namespace MicroRaman
             ShowSpectrum(
                 spectrum.RamanShifts,
                 spectrum.Intensities,
-                string.Format("第 {0} 点开激光原始拉曼谱", e.ScanIndex + 1));
+                string.Format("第 {0} 点光谱", e.ScanIndex + 1));
         }
 
         /// <summary>
@@ -725,7 +840,7 @@ namespace MicroRaman
         /// </summary>
         private async void RamanMapping_Click(object sender, EventArgs e)
         {
-            List<RamanMappingSpectrum> spectra = CreateRamanMappingSnapshot();
+            List<RamanMappingAnalyzer.Spectrum> spectra = CreateRamanMappingSnapshot();
             if (spectra == null)
             {
                 MessageBox.Show(this, "请先完整完成一次蛇形扫描。", "拉曼 Mapping",
@@ -734,44 +849,31 @@ namespace MicroRaman
                 return;
             }
 
-            RamanMappingMode mappingMode = GetSelectedMappingMode();
+            RamanMappingMode selectedMode = GetSelectedMappingMode();
+            if (!mappingSignConfigured || configuredMappingMode != selectedMode)
+            {
+                MessageBox.Show(this,
+                    "请先选择 Mapping 指标，然后点击“设置 Mapping 指标”完成参数设置。",
+                    "拉曼 Mapping", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            RamanMappingMode mappingMode = configuredMappingMode;
             double targetShift = 960.0;
             double halfWidth = 20.0;
-            double referenceShift = double.NaN;
-            double referenceHalfWidth = double.NaN;
-            bool requiresTargetRange = mappingMode == RamanMappingMode.PeakHeight
-                || mappingMode == RamanMappingMode.PeakArea;
-            if (requiresTargetRange)
+            if (RamanMappingOptionsForm.RequiresPeakRanges(mappingMode))
             {
-                using (RamanMappingOptionsForm rangeForm = new RamanMappingOptionsForm(
-                    mappingMode, 500.0, 540.0))
+                if (configuredMappingPeakRanges.Count == 0)
                 {
-                    if (rangeForm.ShowDialog(this) != DialogResult.OK)
-                        return;
-
-                    targetShift = (rangeForm.RangeStart + rangeForm.RangeEnd) * 0.5;
-                    halfWidth = (rangeForm.RangeEnd - rangeForm.RangeStart) * 0.5;
-                }
-            }
-            else if (RequiresPeakParameters(mappingMode))
-            {
-                try
-                {
-                    AutoDetectedRamanPeak detectedPeak =
-                        LabSpecPeakMappingAnalyzer.DetectTargetPeakParameters(spectra);
-                    targetShift = detectedPeak.Center;
-                    halfWidth = detectedPeak.HalfWidth;
-                    referenceShift = detectedPeak.ReferenceCenter;
-                    referenceHalfWidth = detectedPeak.ReferenceHalfWidth;
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, ex.Message, "拉曼 Mapping 失败",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, "请先设置波峰1的拉曼位移范围。", "拉曼 Mapping",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
-            }
 
+                RamanPeakRange primaryPeak = configuredMappingPeakRanges[0];
+                targetShift = (primaryPeak.RangeStart + primaryPeak.RangeEnd) * 0.5;
+                halfWidth = (primaryPeak.RangeEnd - primaryPeak.RangeStart) * 0.5;
+            }
             int dataVersion = spectrumDataVersion;
             mappingCalculationRunning = true;
             RamanMapping.Enabled = false;
@@ -782,42 +884,38 @@ namespace MicroRaman
                 string mappingTitle;
                 if (mappingMode == RamanMappingMode.FullSpectrumDifference)
                 {
-                    FullSpectrumDifferenceMappingResult result = await Task.Run(() =>
-                        FullSpectrumDifferenceMappingAnalyzer.Analyze(spectra));
+                    RamanMappingAnalyzer.FullSpectrumDifferenceMappingResult result = await Task.Run(() =>
+                        RamanMappingAnalyzer.AnalyzeFullSpectrumDifference(spectra));
                     colors = result.Colors;
                     mappingTitle =
                         "拉曼 Mapping（全谱差异：相对背景的荧光/波形变化）";
                 }
                 else if (mappingMode == RamanMappingMode.Pca)
                 {
-                    PcaMappingResult result = await Task.Run(() =>
-                        PcaMappingAnalyzer.Analyze(spectra));
+                    RamanMappingAnalyzer.PcaMappingResult result = await Task.Run(() =>
+                        RamanMappingAnalyzer.AnalyzePca(spectra));
                     colors = result.Colors;
                     mappingTitle = string.Format(
-                        "拉曼 Mapping（PCA 全谱异常，{0} 个主成分；背景蓝，异常区域黄/红）",
+                        "拉曼 Mapping（PCA 全谱异常，{0} 个主成分；黑色为背景）",
                         result.ComponentCount);
                 }
                 else
                 {
-                    LabSpecPeakMappingResult result = await Task.Run(() =>
-                        LabSpecPeakMappingAnalyzer.Analyze(
-                            spectra, targetShift, halfWidth,
-                            referenceShift, referenceHalfWidth, mappingMode));
+                    List<RamanMappingAnalyzer.PeakDefinition> peakDefinitions =
+                        new List<RamanMappingAnalyzer.PeakDefinition>();
+                    for (int index = 0; index < configuredMappingPeakRanges.Count; index++)
+                    {
+                        RamanPeakRange range = configuredMappingPeakRanges[index];
+                        peakDefinitions.Add(new RamanMappingAnalyzer.PeakDefinition(
+                            range.RangeStart, range.RangeEnd, range.Color));
+                    }
+                    RamanMappingAnalyzer.PeakMappingResult result = await Task.Run(() =>
+                        RamanMappingAnalyzer.AnalyzePeaks(spectra, peakDefinitions, mappingMode));
                     colors = result.Colors;
-                    mappingTitle = requiresTargetRange
-                        ? string.Format(
-                            "拉曼 Mapping（{0}：{1:F1}–{2:F1} cm⁻¹ 范围内找峰）",
-                            result.MetricDisplayName,
-                            result.TargetShift - result.HalfWidth,
-                            result.TargetShift + result.HalfWidth)
-                        : string.Format(
-                            "拉曼 Mapping（自动峰 {0:F1}±{1:F1} cm⁻¹，{2}{3}）",
-                            result.TargetShift,
-                            result.HalfWidth,
-                            result.MetricDisplayName,
-                            result.UsedReferenceNormalization
-                                ? string.Format(" / {0:F1} cm⁻¹ 自动参考峰", result.ReferenceShift)
-                                : " / 未使用参考峰");
+                    mappingTitle = string.Format(
+                        "拉曼 Mapping（{0}：{1} 个波峰颜色通道，黑色为背景）",
+                        result.MetricDisplayName,
+                        peakDefinitions.Count);
                 }
                 if (dataVersion != spectrumDataVersion || IsDisposed || Disposing)
                     return;
@@ -839,6 +937,36 @@ namespace MicroRaman
         }
 
         /// <summary>
+        /// Opens the parameter editor for the currently selected mapping metric. This is the
+        /// only place where target peak ranges are edited; generating a map no longer prompts.
+        /// </summary>
+        private void SetMappingSign_Click(object sender, EventArgs e)
+        {
+            RamanMappingMode selectedMode = GetSelectedMappingMode();
+            using (RamanMappingOptionsForm optionsForm = new RamanMappingOptionsForm(
+                selectedMode, configuredMappingPeakRanges))
+            {
+                if (optionsForm.ShowDialog(this) != DialogResult.OK)
+                    return;
+
+                configuredMappingMode = selectedMode;
+                configuredMappingPeakRanges.Clear();
+                if (RamanMappingOptionsForm.RequiresPeakRanges(selectedMode))
+                {
+                    for (int index = 0; index < optionsForm.PeakRanges.Count; index++)
+                    {
+                        RamanPeakRange range = optionsForm.PeakRanges[index];
+                        configuredMappingPeakRanges.Add(
+                            new RamanPeakRange(range.RangeStart, range.RangeEnd, range.Color));
+                    }
+                }
+                mappingSignConfigured = true;
+                SetMappingSign.Text = "已设置："
+                    + RamanMappingOptionsForm.GetModeDisplayName(selectedMode);
+            }
+        }
+
+        /// <summary>
         /// 获取SelectedMappingMode相关的内部处理。
         /// </summary>
         private RamanMappingMode GetSelectedMappingMode()
@@ -854,35 +982,37 @@ namespace MicroRaman
         /// <summary>
         /// 判断PeakParameters相关的内部处理。
         /// </summary>
-        private static bool RequiresPeakParameters(RamanMappingMode mappingMode)
-        {
-            return mappingMode == RamanMappingMode.PeakHeight
-                || mappingMode == RamanMappingMode.PeakArea
-                || mappingMode == RamanMappingMode.PeakPosition
-                || mappingMode == RamanMappingMode.PeakWidth;
-        }
-
         /// <summary>
         /// 复制一份完整扫描数据，使后台计算期间不持有采集数据锁。
         /// </summary>
-        private List<RamanMappingSpectrum> CreateRamanMappingSnapshot()
+        private List<RamanMappingAnalyzer.Spectrum> CreateRamanMappingSnapshot()
         {
             lock (savedSpectrumSync)
             {
                 if (completedScanPointCount < 2 || laserOnSpectra.Count != completedScanPointCount)
                     return null;
 
-                List<RamanMappingSpectrum> spectra =
-                    new List<RamanMappingSpectrum>(completedScanPointCount);
+                // Mapping intensities use one exposure basis so changing integration time
+                // does not by itself make every material channel brighter or darker.
+                double integrationNormalization = DefaultSpectrometerIntegrationTimeMilliseconds
+                    / Math.Max(1.0, spectrometerIntegrationTimeMilliseconds);
+
+                List<RamanMappingAnalyzer.Spectrum> spectra =
+                    new List<RamanMappingAnalyzer.Spectrum>(completedScanPointCount);
                 for (int scanIndex = 0; scanIndex < completedScanPointCount; scanIndex++)
                 {
                     RamanSpectrum spectrum;
                     if (!laserOnSpectra.TryGetValue(scanIndex, out spectrum))
                         return null;
-                    spectra.Add(new RamanMappingSpectrum(
+                    double[] normalizedIntensities = (double[])spectrum.Intensities.Clone();
+                    for (int intensityIndex = 0;
+                        intensityIndex < normalizedIntensities.Length;
+                        intensityIndex++)
+                        normalizedIntensities[intensityIndex] *= integrationNormalization;
+                    spectra.Add(new RamanMappingAnalyzer.Spectrum(
                         scanIndex,
                         (double[])spectrum.RamanShifts.Clone(),
-                        (double[])spectrum.Intensities.Clone()));
+                        normalizedIntensities));
                 }
                 return spectra;
             }
@@ -910,19 +1040,240 @@ namespace MicroRaman
         private void InitializeSpectrumPlot()
         {
             const string plotFont = "Microsoft YaHei UI";
+            displayedRamanShifts = null;
+            displayedSpectrumIntensities = null;
+            spectrumCursorX = null;
+            spectrumCursorLine = null;
+            spectrumAxesNeedAutoScale = true;
+            if (spectrumCursorCoordinateLabel != null)
+                spectrumCursorCoordinateLabel.Visible = false;
             ScottPlot.Fonts.Default = plotFont;
             formsPlot1.Plot.Clear();
             formsPlot1.Plot.Title("等待光谱采集");
-            formsPlot1.Plot.XLabel("拉曼位移 (cm\u207B\u00B9)");
+            formsPlot1.Plot.XLabel("拉曼位移");
             formsPlot1.Plot.YLabel("强度");
             formsPlot1.Plot.Axes.Title.Label.FontName = plotFont;
-            // Segoe UI 包含上标负号 U+207B；中文字符会由系统回退到中文字体。
-            formsPlot1.Plot.Axes.Bottom.Label.FontName = "Segoe UI";
+            formsPlot1.Plot.Axes.Bottom.Label.FontName = plotFont;
             formsPlot1.Plot.Axes.Bottom.TickLabelStyle.FontName = plotFont;
             formsPlot1.Plot.Axes.Left.Label.FontName = plotFont;
             formsPlot1.Plot.Axes.Left.TickLabelStyle.FontName = plotFont;
             formsPlot1.Plot.Font.Automatic();
             formsPlot1.Refresh();
+        }
+
+        /// <summary>
+        /// Enables a persistent draggable vertical spectrum cursor. The coordinate readout is
+        /// a lightweight WinForms overlay, so moving it does not recalculate mapping data.
+        /// </summary>
+        private void InitializeSpectrumCursor()
+        {
+            spectrumCursorCoordinateLabel = new Label
+            {
+                AutoSize = true,
+                BackColor = Color.FromArgb(255, 252, 220),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                ForeColor = Color.Black,
+                Padding = new Padding(5, 3, 5, 3),
+                Visible = false
+            };
+            formsPlot1.Controls.Add(spectrumCursorCoordinateLabel);
+            spectrumCursorCoordinateLabel.BringToFront();
+            // ScottPlot 5 receives pointer input on its inner SKControl rather than on
+            // the outer FormsPlot container.
+            formsPlot1.SKControl.MouseClick += FormsPlot1_MouseClick;
+            formsPlot1.SKControl.MouseDown += FormsPlot1_MouseDown;
+            formsPlot1.SKControl.MouseMove += FormsPlot1_MouseMove;
+            formsPlot1.SKControl.MouseUp += FormsPlot1_MouseUp;
+        }
+
+        private void FormsPlot1_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || displayedRamanShifts == null
+                || displayedRamanShifts.Length < 2 || spectrumPlotWasDragged)
+                return;
+
+            ScottPlot.Pixel pointer = new ScottPlot.Pixel(e.X, e.Y);
+            if (!formsPlot1.Plot.LastRender.DataRect.Contains(pointer))
+                return;
+
+            ScottPlot.Coordinates coordinates = formsPlot1.Plot.GetCoordinates(e.X, e.Y);
+            double minimumX = Math.Min(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            double maximumX = Math.Max(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            spectrumCursorX = Math.Max(minimumX, Math.Min(maximumX, coordinates.X));
+            if (spectrumCursorLine == null)
+                AddSpectrumCursorLine();
+            else
+                spectrumCursorLine.X = spectrumCursorX.Value;
+            UpdateSpectrumCursorReadout();
+            formsPlot1.Refresh();
+        }
+
+        private void FormsPlot1_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            spectrumMouseDownLocation = e.Location;
+            spectrumPlotWasDragged = false;
+            if (!IsPointerNearSpectrumCursor(e.Location))
+                return;
+
+            spectrumCursorDragging = true;
+            formsPlot1.UserInputProcessor.Disable();
+            formsPlot1.SKControl.Capture = true;
+            formsPlot1.SKControl.Cursor = Cursors.Hand;
+        }
+
+        private void FormsPlot1_MouseMove(object sender, MouseEventArgs e)
+        {
+            if ((e.Button & MouseButtons.Left) == MouseButtons.Left)
+            {
+                int deltaX = e.X - spectrumMouseDownLocation.X;
+                int deltaY = e.Y - spectrumMouseDownLocation.Y;
+                if (deltaX * deltaX + deltaY * deltaY > 16)
+                    spectrumPlotWasDragged = true;
+            }
+
+            if (spectrumCursorDragging)
+            {
+                MoveSpectrumCursorToPixel(e.X, e.Y);
+                return;
+            }
+
+            formsPlot1.SKControl.Cursor = IsPointerNearSpectrumCursor(e.Location)
+                ? Cursors.Hand
+                : Cursors.Default;
+        }
+
+        private void FormsPlot1_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || !spectrumCursorDragging)
+                return;
+
+            spectrumCursorDragging = false;
+            formsPlot1.SKControl.Capture = false;
+            formsPlot1.UserInputProcessor.ProcessLostFocus();
+            formsPlot1.UserInputProcessor.Enable();
+            formsPlot1.SKControl.Cursor = IsPointerNearSpectrumCursor(e.Location)
+                ? Cursors.Hand
+                : Cursors.Default;
+        }
+
+        private bool IsPointerNearSpectrumCursor(Point pointer)
+        {
+            if (spectrumCursorLine == null
+                || !formsPlot1.Plot.LastRender.DataRect.Contains(
+                    new ScottPlot.Pixel(pointer.X, pointer.Y)))
+                return false;
+
+            ScottPlot.Pixel linePixel = formsPlot1.Plot.GetPixel(
+                new ScottPlot.Coordinates(spectrumCursorLine.X, 0.0));
+            return Math.Abs(linePixel.X - pointer.X) <= 8.0F;
+        }
+
+        private void MoveSpectrumCursorToPixel(int pixelX, int pixelY)
+        {
+            if (spectrumCursorLine == null || displayedRamanShifts == null
+                || displayedRamanShifts.Length < 2)
+                return;
+
+            double minimumX = Math.Min(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            double maximumX = Math.Max(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            double requestedX = formsPlot1.Plot.GetCoordinates(pixelX, pixelY).X;
+            spectrumCursorX = Math.Max(minimumX, Math.Min(maximumX, requestedX));
+            spectrumCursorLine.X = spectrumCursorX.Value;
+            UpdateSpectrumCursorReadout();
+            formsPlot1.Refresh();
+        }
+
+        private void AddSpectrumCursorLine()
+        {
+            if (!spectrumCursorX.HasValue || displayedRamanShifts == null
+                || displayedRamanShifts.Length < 2)
+                return;
+
+            double minimumX = Math.Min(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            double maximumX = Math.Max(displayedRamanShifts[0],
+                displayedRamanShifts[displayedRamanShifts.Length - 1]);
+            spectrumCursorX = Math.Max(minimumX,
+                Math.Min(maximumX, spectrumCursorX.Value));
+            spectrumCursorLine = formsPlot1.Plot.Add.VerticalLine(spectrumCursorX.Value);
+            spectrumCursorLine.Color = ScottPlot.Colors.Yellow;
+            spectrumCursorLine.LineWidth = 2F;
+            // Dragging is handled explicitly so the plot pans everywhere except near this line.
+            spectrumCursorLine.IsDraggable = false;
+            spectrumCursorLine.EnableAutoscale = false;
+            spectrumCursorLine.Minimum = minimumX;
+            spectrumCursorLine.Maximum = maximumX;
+        }
+
+        private void UpdateSpectrumCursorReadout()
+        {
+            double intensity;
+            if (!spectrumCursorX.HasValue
+                || !TryInterpolateDisplayedSpectrum(spectrumCursorX.Value, out intensity))
+            {
+                spectrumCursorCoordinateLabel.Visible = false;
+                return;
+            }
+
+            spectrumCursorCoordinateLabel.Text = string.Format(CultureInfo.CurrentCulture,
+                "拉曼位移：{0:N2} cm⁻¹\r\n强度：{1:N2}",
+                spectrumCursorX.Value, intensity);
+            Size labelSize = spectrumCursorCoordinateLabel.PreferredSize;
+            spectrumCursorCoordinateLabel.Location = new Point(
+                Math.Max(0, formsPlot1.ClientSize.Width - labelSize.Width - 18), 16);
+            spectrumCursorCoordinateLabel.Visible = true;
+            spectrumCursorCoordinateLabel.BringToFront();
+        }
+
+        /// <summary>
+        /// Returns the exact waveform intersection at the cursor X position by linearly
+        /// interpolating between the two surrounding acquired samples.
+        /// </summary>
+        private bool TryInterpolateDisplayedSpectrum(double x, out double intensity)
+        {
+            intensity = double.NaN;
+            double[] shifts = displayedRamanShifts;
+            double[] values = displayedSpectrumIntensities;
+            if (shifts == null || values == null || shifts.Length < 2
+                || shifts.Length != values.Length)
+                return false;
+
+            bool ascending = shifts[shifts.Length - 1] >= shifts[0];
+            double minimumX = ascending ? shifts[0] : shifts[shifts.Length - 1];
+            double maximumX = ascending ? shifts[shifts.Length - 1] : shifts[0];
+            if (x < minimumX || x > maximumX)
+                return false;
+
+            int low = 0;
+            int high = shifts.Length - 1;
+            while (high - low > 1)
+            {
+                int middle = low + (high - low) / 2;
+                if ((ascending && shifts[middle] <= x)
+                    || (!ascending && shifts[middle] >= x))
+                    low = middle;
+                else
+                    high = middle;
+            }
+
+            double x1 = shifts[low];
+            double x2 = shifts[high];
+            if (Math.Abs(x2 - x1) <= 1e-12)
+            {
+                intensity = values[low];
+                return true;
+            }
+            double fraction = (x - x1) / (x2 - x1);
+            intensity = values[low] + (values[high] - values[low]) * fraction;
+            return !double.IsNaN(intensity) && !double.IsInfinity(intensity);
         }
 
         /// <summary>
@@ -939,16 +1290,30 @@ namespace MicroRaman
                 return;
             }
 
+            displayedRamanShifts = ramanShifts;
+            displayedSpectrumIntensities = intensities;
             formsPlot1.Plot.Clear();
             ScottPlot.Plottables.Scatter spectrum = formsPlot1.Plot.Add.Scatter(ramanShifts, intensities);
             spectrum.MarkerSize = 0;
             spectrum.LineWidth = 1.5F;
             spectrum.Color = ScottPlot.Colors.Red;
             formsPlot1.Plot.Title(title);
-            formsPlot1.Plot.XLabel("拉曼位移 (cm\u207B\u00B9)");
-            formsPlot1.Plot.Axes.Bottom.Label.FontName = "Segoe UI";
+            formsPlot1.Plot.XLabel("拉曼位移");
+            formsPlot1.Plot.Axes.Bottom.Label.FontName = "Microsoft YaHei UI";
             formsPlot1.Plot.YLabel("强度");
-            formsPlot1.Plot.Axes.AutoScale();
+            // Establish limits only for the first spectrum after an intentional clear.
+            // Later realtime frames and scan-point spectra preserve the user's zoom and pan.
+            if (spectrumAxesNeedAutoScale)
+            {
+                formsPlot1.Plot.Axes.AutoScale();
+                spectrumAxesNeedAutoScale = false;
+            }
+            spectrumCursorLine = null;
+            if (spectrumCursorX.HasValue)
+            {
+                AddSpectrumCursorLine();
+                UpdateSpectrumCursorReadout();
+            }
             formsPlot1.Refresh();
         }
 
@@ -959,7 +1324,7 @@ namespace MicroRaman
         {
             if (realtimeSpectrumCancellation != null)
             {
-                await StopRealtimeSpectrumAsync(true);
+                await StopRealtimeSpectrumAsync();
                 return;
             }
 
@@ -993,16 +1358,21 @@ namespace MicroRaman
                     }
                 }
 
+                // A confirmed new realtime session starts with an empty chart. Stopping the
+                // session later preserves its final frame for cursor inspection.
+                InitializeSpectrumPlot();
                 // 每次会话都废弃上一轮的暗谱，并在 LD 关闭后重新开始一次完整积分。
                 ClearSavedRealtimeDarkSpectrum();
                 SetLaserOutputForScan(false);
                 RealtimeSpectrum.Enabled = false;
                 await Task.Run(() => SaveCurrentDarkSpectrum());
                 // 暗谱完成后，为实时调试恢复激发光：先 TEC，后 LD。
+                // 预等待与随后丢弃的首帧共同覆盖 LD 稳定时间，避免短积分的首张有效谱偏低。
                 SetTecOutputForScan(true);
                 SetLaserOutputForScan(true);
-                int brightFrameDelay = Math.Max(300, GetSpectrometerIntegrationTimeMillisecondsForScan() + 100);
-                await Task.Delay(brightFrameDelay);
+                int laserPreAcquisitionDelay = GetLaserOutputPreAcquisitionDelayMilliseconds();
+                if (laserPreAcquisitionDelay > 0)
+                    await Task.Delay(laserPreAcquisitionDelay);
                 if (showSuccessMessage)
                 {
                     MessageBox.Show(this,
@@ -1014,7 +1384,7 @@ namespace MicroRaman
                 realtimeSpectrumCancellation = cancellation;
                 realtimeSpectrumStarting = false;
                 RealtimeSpectrum.Text = "停止实时光谱";
-                RealtimeSpectrum.ToolTipText = "停止实时读取并清空波形图";
+                RealtimeSpectrum.ToolTipText = "停止实时读取并保留最后一帧光谱";
                 RealtimeSpectrum.Enabled = true;
                 UpdatePlatformCommandButtonState();
                 realtimeSpectrumTask = Task.Run(() => RunRealtimeSpectrumLoop(cancellation), cancellation.Token);
@@ -1128,7 +1498,7 @@ namespace MicroRaman
         /// <summary>
         /// 停止实时读取；停止当前 SDK 读谱以便立即释放光谱仪锁。
         /// </summary>
-        private async Task StopRealtimeSpectrumAsync(bool clearPlot)
+        private async Task StopRealtimeSpectrumAsync()
         {
             CancellationTokenSource cancellation = realtimeSpectrumCancellation;
             Task runningTask = realtimeSpectrumTask;
@@ -1154,8 +1524,6 @@ namespace MicroRaman
                 ClearSavedRealtimeDarkSpectrum();
             }
 
-            if (clearPlot && !IsDisposed && !Disposing)
-                InitializeSpectrumPlot();
             realtimeSpectrumStarting = false;
             UpdatePlatformCommandButtonState();
             UpdateRealtimeSpectrumButtonState();
@@ -1212,7 +1580,7 @@ namespace MicroRaman
             if (isRunning)
             {
                 RealtimeSpectrum.Text = "停止实时光谱";
-                RealtimeSpectrum.ToolTipText = "停止实时读取并清空波形图";
+                RealtimeSpectrum.ToolTipText = "停止实时读取并保留最后一帧光谱";
                 RealtimeSpectrum.Enabled = true;
                 return;
             }
@@ -1267,7 +1635,7 @@ namespace MicroRaman
                 && cameraShowForm.TryGetSnakeScanPoints(
                     out scanPoints, out errorMessage, out selectionPixelAspectRatio))
             {
-                ClearSavedScanSpectra();
+                ClearSavedScanSpectra(false);
                 scanMatrixPreviewControl.SetScanGrid(scanPoints, selectionPixelAspectRatio);
             }
 
@@ -1332,7 +1700,7 @@ namespace MicroRaman
                 if (restartRealtimeSpectrum)
                 {
                     // 先完全结束旧积分、关闭 LD/TEC；旧积分时间对应的暗谱不能继续使用。
-                    await StopRealtimeSpectrumAsync(true);
+                    await StopRealtimeSpectrumAsync();
                     realtimeSpectrumStarting = true;
                     UpdatePlatformCommandButtonState();
                 }
@@ -1504,6 +1872,17 @@ namespace MicroRaman
         }
 
         /// <summary>
+        /// 只补足丢弃首帧仍未覆盖的 LD 稳定时间；长积分返回零，不产生重复等待。
+        /// </summary>
+        private int GetLaserOutputPreAcquisitionDelayMilliseconds()
+        {
+            int discardedFrameDuration = Math.Max(
+                MinimumSpectrumFrameDurationMilliseconds,
+                GetSpectrometerIntegrationTimeMillisecondsForScan());
+            return Math.Max(0, LaserOutputStabilizationMilliseconds - discardedFrameDuration);
+        }
+
+        /// <summary>
         /// 关闭并释放当前激光器设置窗口，避免重新连接后继续操作旧设备对象。
         /// </summary>
         private void CloseLaserSettingsWindow()
@@ -1571,7 +1950,7 @@ namespace MicroRaman
         /// <summary>
         /// 重新框选扫描区域时丢弃旧网格及其所有已保存光谱。
         /// </summary>
-        private void ClearSavedScanSpectra()
+        private void ClearSavedScanSpectra(bool clearSpectrumPlot)
         {
             lock (savedSpectrumSync)
                 laserOnSpectra.Clear();
@@ -1583,7 +1962,8 @@ namespace MicroRaman
             scanMatrixPreviewControl.ClearSpectrumAvailability();
             scanMatrixPreviewControl.ClearMappingColors();
             scanMatrixGroupBox.Text = "扫描坐标矩阵";
-            InitializeSpectrumPlot();
+            if (clearSpectrumPlot)
+                InitializeSpectrumPlot();
             UpdateRamanMappingButtonState();
         }
 
@@ -1597,7 +1977,10 @@ namespace MicroRaman
                 cameraShowForm = new CameraShowForm();
                 cameraShowForm.SelectionPreviewUpdated += CameraSelectionPreviewUpdated;
                 cameraShowForm.FormClosed += CameraShowForm_FormClosed;
-                cameraShowForm.Show(this);
+                // Do not make CameraShow an owned window; every top-level window should
+                // come to the front naturally when the user clicks it.
+                cameraShowForm.Show();
+                cameraShowForm.Activate();
                 return;
             }
 
@@ -1656,7 +2039,7 @@ namespace MicroRaman
                 return;
 
             if (realtimeSpectrumCancellation != null)
-                await StopRealtimeSpectrumAsync(true);
+                await StopRealtimeSpectrumAsync();
 
             calibrationCancellation = new CancellationTokenSource();
             CancellationToken token = calibrationCancellation.Token;
@@ -1777,8 +2160,8 @@ namespace MicroRaman
 
             // 即使框选区域未改变，新一轮蛇形扫描也不能复用上一轮的点位光谱。
             if (realtimeSpectrumCancellation != null)
-                await StopRealtimeSpectrumAsync(true);
-            ClearSavedScanSpectra();
+                await StopRealtimeSpectrumAsync();
+            ClearSavedScanSpectra(true);
 
             scanStartedUtc = DateTime.UtcNow;
             scanCancellation = new CancellationTokenSource();
@@ -1801,7 +2184,7 @@ namespace MicroRaman
                         SetTecOutputForScan,
                         WarmUpSpectrometerForScan,
                         CaptureDarkSpectrumForScan,
-                        GetSpectrometerIntegrationTimeMillisecondsForScan(),
+                        GetLaserOutputPreAcquisitionDelayMilliseconds(),
                         AcquireSpectrumForScan),
                     token);
                 completedScanPointCount = scanPoints.Count;

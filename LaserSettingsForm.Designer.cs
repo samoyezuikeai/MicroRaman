@@ -369,25 +369,25 @@ namespace MicroRaman
             this.powerValue.Size = new Size(190, 28);
             this.powerValue.Maximum = new decimal(new int[] { 1000, 0, 0, 0 });
             this.powerValue.Name = "powerValue";
-            this.powerValue.Value = new decimal(new int[] { 100, 0, 0, 0 });
+            this.powerValue.Value = new decimal(new int[] { 50, 0, 0, 0 });
             this.pwmValue.Anchor = AnchorStyles.Left;
             this.pwmValue.Margin = new Padding(0, 7, 0, 0);
             this.pwmValue.Size = new Size(190, 28);
             this.pwmValue.Maximum = new decimal(new int[] { 4800, 0, 0, 0 });
             this.pwmValue.Name = "pwmValue";
-            this.pwmValue.Value = new decimal(new int[] { 3000, 0, 0, 0 });
+            this.pwmValue.Value = new decimal(new int[] { 1400, 0, 0, 0 });
             this.pwmCorrectValue.Anchor = AnchorStyles.Left;
             this.pwmCorrectValue.Margin = new Padding(0, 7, 0, 0);
             this.pwmCorrectValue.Size = new Size(190, 28);
             this.pwmCorrectValue.Maximum = new decimal(new int[] { 4800, 0, 0, 0 });
             this.pwmCorrectValue.Name = "pwmCorrectValue";
-            this.pwmCorrectValue.Value = new decimal(new int[] { 3000, 0, 0, 0 });
+            this.pwmCorrectValue.Value = new decimal(new int[] { 1400, 0, 0, 0 });
             this.currentValue.Anchor = AnchorStyles.Left;
             this.currentValue.Margin = new Padding(0, 7, 0, 0);
             this.currentValue.Size = new Size(190, 28);
             this.currentValue.Maximum = new decimal(new int[] { 1200, 0, 0, 0 });
             this.currentValue.Name = "currentValue";
-            this.currentValue.Value = new decimal(new int[] { 1000, 0, 0, 0 });
+            this.currentValue.Value = new decimal(new int[] { 800, 0, 0, 0 });
             // 
             // applyPowerButton
             // 

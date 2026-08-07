@@ -41,6 +41,7 @@ namespace MicroRaman
             this.RamanMapping = new System.Windows.Forms.ToolStripButton();
             this.panel1 = new System.Windows.Forms.Panel();
             this.mappingReferenceGroupBox = new System.Windows.Forms.GroupBox();
+            this.SetMappingSign = new System.Windows.Forms.Button();
             this.mappingPcaRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingFullSpectrumRadioButton = new System.Windows.Forms.RadioButton();
             this.mappingReferenceHintLabel = new System.Windows.Forms.Label();
@@ -66,6 +67,7 @@ namespace MicroRaman
             this.panel1.SuspendLayout();
             this.mappingReferenceGroupBox.SuspendLayout();
             this.scanWorkspace.SuspendLayout();
+            this.scanMatrixGroupBox.SuspendLayout();
             this.brightFieldGroupBox.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.brightFieldPreviewPictureBox)).BeginInit();
             this.SuspendLayout();
@@ -143,7 +145,7 @@ namespace MicroRaman
             this.CameraShow.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.CameraShow.Name = "CameraShow";
             this.CameraShow.Size = new System.Drawing.Size(56, 56);
-            this.CameraShow.ToolTipText = "点击后打开显微镜摄像头，检测前一定要打开";
+            this.CameraShow.ToolTipText = "点击后打开显微镜摄像头";
             this.CameraShow.Click += new System.EventHandler(this.CameraShow_Click);
             // 
             // CalibrateStage
@@ -154,7 +156,7 @@ namespace MicroRaman
             this.CalibrateStage.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.CalibrateStage.Name = "CalibrateStage";
             this.CalibrateStage.Size = new System.Drawing.Size(56, 56);
-            this.CalibrateStage.ToolTipText = "在关闭激光、打开明场照明后计算像素与平台坐标比例";
+            this.CalibrateStage.ToolTipText = "在关闭激光、打开明场照明后计算像素与平台坐标比例定标校准";
             this.CalibrateStage.Click += new System.EventHandler(this.CalibrateStage_Click);
             // 
             // RealtimeSpectrum
@@ -221,6 +223,7 @@ namespace MicroRaman
             // 
             // mappingReferenceGroupBox
             // 
+            this.mappingReferenceGroupBox.Controls.Add(this.SetMappingSign);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPcaRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingFullSpectrumRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingReferenceHintLabel);
@@ -235,6 +238,16 @@ namespace MicroRaman
             this.mappingReferenceGroupBox.TabIndex = 12;
             this.mappingReferenceGroupBox.TabStop = false;
             this.mappingReferenceGroupBox.Text = "Mapping 参考指标";
+            // 
+            // SetMappingSign
+            // 
+            this.SetMappingSign.Location = new System.Drawing.Point(18, 378);
+            this.SetMappingSign.Name = "SetMappingSign";
+            this.SetMappingSign.Size = new System.Drawing.Size(304, 56);
+            this.SetMappingSign.TabIndex = 8;
+            this.SetMappingSign.Text = "设置 Mapping 指标";
+            this.SetMappingSign.UseVisualStyleBackColor = true;
+            this.SetMappingSign.Click += new System.EventHandler(this.SetMappingSign_Click);
             // 
             // mappingPcaRadioButton
             // 
@@ -492,6 +505,7 @@ namespace MicroRaman
             this.mappingReferenceGroupBox.ResumeLayout(false);
             this.mappingReferenceGroupBox.PerformLayout();
             this.scanWorkspace.ResumeLayout(false);
+            this.scanMatrixGroupBox.ResumeLayout(false);
             this.brightFieldGroupBox.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.brightFieldPreviewPictureBox)).EndInit();
             this.ResumeLayout(false);
@@ -512,6 +526,7 @@ namespace MicroRaman
         private System.Windows.Forms.ToolStripButton RamanMapping;
         private System.Windows.Forms.Panel panel1;
         private System.Windows.Forms.GroupBox mappingReferenceGroupBox;
+        private System.Windows.Forms.Button SetMappingSign;
         private System.Windows.Forms.RadioButton mappingFullSpectrumRadioButton;
         private System.Windows.Forms.Label mappingReferenceHintLabel;
         private System.Windows.Forms.RadioButton mappingPcaRadioButton;
@@ -535,4 +550,3 @@ namespace MicroRaman
         private System.Windows.Forms.Label brightFieldPreviewStatusLabel;
     }
 }
-

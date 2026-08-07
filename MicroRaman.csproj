@@ -154,9 +154,7 @@
       <DependentUpon>DarkSpectrumPromptForm.cs</DependentUpon>
     </Compile>
     <Compile Include="RamanMappingAnalyzer.cs" />
-    <Compile Include="RamanMappingOptionsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="RamanMappingOptionsForm.cs" />
     <Compile Include="StageScanController.cs" />
     <Compile Include="TUCamNative.cs" />
     <Compile Include="SerialPortManager.cs" />

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -14,146 +15,429 @@ namespace MicroRaman
         Pca
     }
 
+    internal sealed class RamanPeakRange
+    {
+        internal RamanPeakRange(double rangeStart, double rangeEnd)
+            : this(rangeStart, rangeEnd, Color.Empty)
+        {
+        }
+
+        internal RamanPeakRange(double rangeStart, double rangeEnd, Color color)
+        {
+            RangeStart = rangeStart;
+            RangeEnd = rangeEnd;
+            Color = color;
+        }
+
+        internal double RangeStart { get; private set; }
+        internal double RangeEnd { get; private set; }
+        internal Color Color { get; private set; }
+    }
+
     /// <summary>
-    /// 收集峰高或峰面积 Mapping 的目标拉曼位移范围。
-    /// 系统只在用户指定的范围内寻找峰并计算指标。
+    /// Configures one or more target Raman peak ranges for the selected mapping mode.
+    /// Each saved row becomes one independently coloured mapping channel.
     /// </summary>
     internal sealed class RamanMappingOptionsForm : Form
     {
-        private readonly NumericUpDown rangeStartInput;
-        private readonly NumericUpDown rangeEndInput;
+        private sealed class PeakRangeRow
+        {
+            internal Label NameLabel;
+            internal NumericUpDown StartInput;
+            internal NumericUpDown EndInput;
+            internal ComboBox ColorInput;
+            internal Panel ColorPreview;
+            internal Label Separator;
+            internal Button DeleteButton;
+        }
 
-        /// <summary>
-        /// 初始化目标峰范围输入窗口。
-        /// 峰高和峰面积将只使用该闭区间中的最大峰。
-        /// </summary>
+        private sealed class PeakColorChoice
+        {
+            internal PeakColorChoice(string name, Color color)
+            {
+                Name = name;
+                Color = color;
+            }
+
+            internal string Name { get; private set; }
+            internal Color Color { get; private set; }
+            public override string ToString() { return Name; }
+        }
+
+        private readonly RamanMappingMode mappingMode;
+        private readonly Panel rowsPanel;
+        private readonly Button addButton;
+        private readonly List<PeakRangeRow> rows = new List<PeakRangeRow>();
+        private readonly List<RamanPeakRange> peakRanges = new List<RamanPeakRange>();
+        private readonly List<PeakColorChoice> peakColorChoices = new List<PeakColorChoice>
+        {
+            new PeakColorChoice("蓝色", Color.FromArgb(30, 144, 255)),
+            new PeakColorChoice("青色", Color.FromArgb(0, 200, 220)),
+            new PeakColorChoice("绿色", Color.FromArgb(45, 180, 95)),
+            new PeakColorChoice("黄色", Color.FromArgb(255, 215, 0)),
+            new PeakColorChoice("橙色", Color.FromArgb(255, 128, 0)),
+            new PeakColorChoice("红色", Color.FromArgb(220, 45, 40))
+        };
+        private bool changingColors;
+
         internal RamanMappingOptionsForm(
             RamanMappingMode mappingMode,
-            double suggestedStart,
-            double suggestedEnd)
+            IList<RamanPeakRange> existingRanges)
         {
-            Text = "拉曼 Mapping 参数";
+            this.mappingMode = mappingMode;
+            Text = GetModeDisplayName(mappingMode);
             Font = new Font("Microsoft YaHei UI", 9F);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(490, 215);
+            ClientSize = new Size(830, 350);
 
-            Label description = new Label
+            rowsPanel = new Panel
             {
-                AutoSize = false,
-                Location = new Point(18, 14),
-                Size = new Size(450, 48),
-                Text = "填写目标峰所在的拉曼位移范围。当前指标："
-                    + GetModeDisplayName(mappingMode)
-                    + "。系统只在这个范围内寻找峰，不会使用整条光谱的最大峰。"
+                AutoScroll = true,
+                Location = new Point(18, 54),
+                Size = new Size(794, 230),
+                BorderStyle = BorderStyle.FixedSingle
             };
-            Label rangeStartLabel = new Label
+            addButton = new Button
             {
-                AutoSize = true,
-                Location = new Point(18, 76),
-                Text = "范围起点 (cm⁻¹)："
+                Location = new Point(758, 12),
+                Size = new Size(54, 34),
+                Text = "+"
             };
-            rangeStartInput = new NumericUpDown
-            {
-                DecimalPlaces = 1,
-                Increment = 1M,
-                Minimum = -500M,
-                Maximum = 3500M,
-                Location = new Point(220, 72),
-                Size = new Size(130, 30),
-                Value = ClampDecimal(suggestedStart, -500M, 3500M)
-            };
-            Label rangeEndLabel = new Label
-            {
-                AutoSize = true,
-                Location = new Point(18, 117),
-                Text = "范围终点 (cm⁻¹)："
-            };
-            rangeEndInput = new NumericUpDown
-            {
-                DecimalPlaces = 1,
-                Increment = 1M,
-                Minimum = -500M,
-                Maximum = 3500M,
-                Location = new Point(220, 113),
-                Size = new Size(130, 30),
-                Value = ClampDecimal(suggestedEnd, -500M, 3500M)
-            };
+            addButton.Click += AddButton_Click;
+
             Button okButton = new Button
             {
-                Location = new Point(285, 164),
-                Size = new Size(82, 34),
-                Text = "生成"
+                Location = new Point(626, 300),
+                Size = new Size(86, 36),
+                Text = "确定"
             };
             okButton.Click += OkButton_Click;
             Button cancelButton = new Button
             {
                 DialogResult = DialogResult.Cancel,
-                Location = new Point(382, 164),
-                Size = new Size(82, 34),
+                Location = new Point(726, 300),
+                Size = new Size(86, 36),
                 Text = "取消"
             };
 
-            Controls.AddRange(new Control[]
-            {
-                description, rangeStartLabel, rangeStartInput, rangeEndLabel, rangeEndInput,
-                okButton, cancelButton
-            });
+            Controls.AddRange(new Control[] { rowsPanel, addButton, okButton, cancelButton });
             AcceptButton = okButton;
             CancelButton = cancelButton;
+
+            bool requiresPeakRanges = RequiresPeakRanges(mappingMode);
+            rowsPanel.Visible = requiresPeakRanges;
+            addButton.Visible = requiresPeakRanges;
+            if (requiresPeakRanges)
+            {
+                Label header = new Label
+                {
+                    AutoSize = true,
+                    Location = new Point(18, 19),
+                    Text = "设置目标波峰范围（cm⁻¹）"
+                };
+                Controls.Add(header);
+
+                if (existingRanges != null && existingRanges.Count > 0)
+                {
+                    for (int index = 0; index < existingRanges.Count; index++)
+                        AddPeakRangeRow(existingRanges[index].RangeStart,
+                            existingRanges[index].RangeEnd, existingRanges[index].Color);
+                }
+                else
+                {
+                    AddPeakRangeRow(500.0, 540.0, peakColorChoices[0].Color);
+                }
+            }
         }
 
-        internal double RangeStart { get { return (double)rangeStartInput.Value; } }
-        internal double RangeEnd { get { return (double)rangeEndInput.Value; } }
-
-        /// <summary>
-        /// 验证用户给出的目标峰范围。
-        /// 起点必须小于终点，且范围至少覆盖一个有效光谱采样点。
-        /// </summary>
-        private void OkButton_Click(object sender, EventArgs e)
+        internal IList<RamanPeakRange> PeakRanges
         {
-            if (RangeEnd <= RangeStart)
-            {
-                MessageBox.Show(this, "范围终点必须大于范围起点。", "拉曼 Mapping 参数",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (RangeEnd - RangeStart < 2.0)
-            {
-                MessageBox.Show(this, "拉曼位移范围过窄，请至少设置 2 cm⁻¹。", "拉曼 Mapping 参数",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            DialogResult = DialogResult.OK;
+            get { return peakRanges.AsReadOnly(); }
         }
 
-        /// <summary>
-        /// 获取ModeDisplayName相关的内部处理。
-        /// </summary>
-        private static string GetModeDisplayName(RamanMappingMode mode)
+        internal static bool RequiresPeakRanges(RamanMappingMode mode)
+        {
+            return mode == RamanMappingMode.PeakHeight
+                || mode == RamanMappingMode.PeakArea
+                || mode == RamanMappingMode.PeakPosition
+                || mode == RamanMappingMode.PeakWidth;
+        }
+
+        internal static string GetModeDisplayName(RamanMappingMode mode)
         {
             switch (mode)
             {
                 case RamanMappingMode.PeakHeight: return "峰高（强度）";
+                case RamanMappingMode.PeakArea: return "峰面积";
                 case RamanMappingMode.PeakPosition: return "峰位置";
                 case RamanMappingMode.PeakWidth: return "半高宽 FWHM";
-                default: return "峰面积";
+                case RamanMappingMode.FullSpectrumDifference: return "全谱差异（荧光）";
+                case RamanMappingMode.Pca: return "PCA 全谱异常";
+                default: return "Mapping 设置";
             }
         }
-        /// <summary>
-        /// 限制Decimal相关的内部处理。
-        /// </summary>
+
+        private void AddButton_Click(object sender, EventArgs e)
+        {
+            double start = rows.Count > 0 ? (double)rows[rows.Count - 1].StartInput.Value : 500.0;
+            double end = rows.Count > 0 ? (double)rows[rows.Count - 1].EndInput.Value : 540.0;
+            Color nextColor;
+            if (!TryGetFirstAvailableColor(out nextColor))
+            {
+                MessageBox.Show(this, "每个波峰必须使用不同颜色，最多可设置 6 个波峰。",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            AddPeakRangeRow(start, end, nextColor);
+        }
+
+        private void AddPeakRangeRow(double suggestedStart, double suggestedEnd, Color suggestedColor)
+        {
+            PeakRangeRow row = new PeakRangeRow
+            {
+                NameLabel = new Label
+                {
+                    AutoSize = true,
+                    Location = new Point(12, 0)
+                },
+                StartInput = new NumericUpDown
+                {
+                    DecimalPlaces = 1,
+                    Increment = 1M,
+                    Minimum = -500M,
+                    Maximum = 3500M,
+                    Location = new Point(105, 0),
+                    Size = new Size(150, 30),
+                    Value = ClampDecimal(suggestedStart, -500M, 3500M)
+                },
+                EndInput = new NumericUpDown
+                {
+                    DecimalPlaces = 1,
+                    Increment = 1M,
+                    Minimum = -500M,
+                    Maximum = 3500M,
+                    Location = new Point(330, 0),
+                    Size = new Size(150, 30),
+                    Value = ClampDecimal(suggestedEnd, -500M, 3500M)
+                },
+                ColorInput = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(510, 0),
+                    Size = new Size(118, 30)
+                },
+                ColorPreview = new Panel
+                {
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Location = new Point(642, 0),
+                    Size = new Size(48, 24)
+                },
+                DeleteButton = new Button
+                {
+                    Location = new Point(704, 0),
+                    Size = new Size(70, 30),
+                    Text = "删除"
+                }
+            };
+            row.Separator = new Label
+            {
+                AutoSize = true,
+                Location = new Point(278, 0),
+                Text = "至"
+            };
+            rows.Add(row);
+            for (int index = 0; index < peakColorChoices.Count; index++)
+                row.ColorInput.Items.Add(peakColorChoices[index]);
+            SelectColor(row, suggestedColor);
+            row.ColorInput.SelectedIndexChanged += ColorInput_SelectedIndexChanged;
+            row.DeleteButton.Click += DeleteButton_Click;
+            rowsPanel.Controls.AddRange(new Control[]
+            {
+                row.NameLabel, row.StartInput, row.Separator, row.EndInput,
+                row.ColorInput, row.ColorPreview, row.DeleteButton
+            });
+            LayoutRows();
+        }
+
+        private void DeleteButton_Click(object sender, EventArgs e)
+        {
+            PeakRangeRow row = rows.Find(item => item.DeleteButton == sender);
+            if (row == null || rows.Count <= 1)
+                return;
+
+            rows.Remove(row);
+            foreach (Control control in new Control[]
+            {
+                row.NameLabel, row.StartInput, row.Separator, row.EndInput,
+                row.ColorInput, row.ColorPreview, row.DeleteButton
+            })
+            {
+                rowsPanel.Controls.Remove(control);
+                control.Dispose();
+            }
+            LayoutRows();
+        }
+
+        private void LayoutRows()
+        {
+            for (int index = 0; index < rows.Count; index++)
+            {
+                PeakRangeRow row = rows[index];
+                int top = 12 + index * 46;
+                row.NameLabel.Text = "波峰" + (index + 1);
+                row.NameLabel.Location = new Point(12, top + 7);
+                row.StartInput.Location = new Point(105, top);
+                row.Separator.Location = new Point(278, top + 7);
+                row.EndInput.Location = new Point(330, top);
+                row.ColorInput.Location = new Point(510, top);
+                row.ColorPreview.Location = new Point(642, top + 3);
+                row.DeleteButton.Location = new Point(704, top);
+                row.DeleteButton.Enabled = rows.Count > 1;
+            }
+            rowsPanel.AutoScrollMinSize = new Size(0, 12 + rows.Count * 46 + 4);
+        }
+
+        private void OkButton_Click(object sender, EventArgs e)
+        {
+            peakRanges.Clear();
+            if (RequiresPeakRanges(mappingMode))
+            {
+                for (int index = 0; index < rows.Count; index++)
+                {
+                    double start = (double)rows[index].StartInput.Value;
+                    double end = (double)rows[index].EndInput.Value;
+                    if (end <= start)
+                    {
+                        MessageBox.Show(this,
+                            "波峰" + (index + 1) + "的终点必须大于起点。",
+                            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    if (end - start < 2.0)
+                    {
+                        MessageBox.Show(this,
+                            "波峰" + (index + 1) + "的范围至少需要 2 cm⁻¹。",
+                            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    PeakColorChoice choice = rows[index].ColorInput.SelectedItem as PeakColorChoice;
+                    if (choice == null)
+                    {
+                        MessageBox.Show(this, "请为波峰" + (index + 1) + "选择颜色。",
+                            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    for (int previous = 0; previous < index; previous++)
+                    {
+                        PeakColorChoice previousChoice = rows[previous].ColorInput.SelectedItem as PeakColorChoice;
+                        if (previousChoice != null && previousChoice.Color.ToArgb() == choice.Color.ToArgb())
+                        {
+                            MessageBox.Show(this, "每个波峰必须选择不同颜色。",
+                                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                    }
+                    peakRanges.Add(new RamanPeakRange(start, end, choice.Color));
+                }
+            }
+            DialogResult = DialogResult.OK;
+        }
+
         private static decimal ClampDecimal(double value, decimal minimum, decimal maximum)
         {
             decimal converted;
             try { converted = Convert.ToDecimal(value); }
             catch { converted = 0M; }
             return Math.Max(minimum, Math.Min(maximum, converted));
+        }
+
+        private void ColorInput_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (changingColors)
+                return;
+
+            PeakRangeRow changedRow = rows.Find(row => row.ColorInput == sender);
+            if (changedRow == null)
+                return;
+            PeakColorChoice changedChoice = changedRow.ColorInput.SelectedItem as PeakColorChoice;
+            if (changedChoice == null)
+                return;
+
+            foreach (PeakRangeRow row in rows)
+            {
+                if (row == changedRow)
+                    continue;
+                PeakColorChoice otherChoice = row.ColorInput.SelectedItem as PeakColorChoice;
+                if (otherChoice == null || otherChoice.Color.ToArgb() != changedChoice.Color.ToArgb())
+                    continue;
+
+                Color replacement;
+                if (TryGetFirstAvailableColor(out replacement, changedRow))
+                {
+                    changingColors = true;
+                    SelectColor(changedRow, replacement);
+                    changingColors = false;
+                }
+                else
+                {
+                    MessageBox.Show(this, "每个波峰必须选择不同颜色。", Text,
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+            UpdateColorPreview(changedRow);
+        }
+
+        private bool TryGetFirstAvailableColor(out Color color, PeakRangeRow ignoredRow = null)
+        {
+            for (int colorIndex = 0; colorIndex < peakColorChoices.Count; colorIndex++)
+            {
+                Color candidate = peakColorChoices[colorIndex].Color;
+                bool used = false;
+                foreach (PeakRangeRow row in rows)
+                {
+                    if (row == ignoredRow)
+                        continue;
+                    PeakColorChoice choice = row.ColorInput.SelectedItem as PeakColorChoice;
+                    if (choice != null && choice.Color.ToArgb() == candidate.ToArgb())
+                    {
+                        used = true;
+                        break;
+                    }
+                }
+                if (!used)
+                {
+                    color = candidate;
+                    return true;
+                }
+            }
+            color = Color.Empty;
+            return false;
+        }
+
+        private void SelectColor(PeakRangeRow row, Color color)
+        {
+            for (int index = 0; index < peakColorChoices.Count; index++)
+            {
+                if (peakColorChoices[index].Color.ToArgb() == color.ToArgb())
+                {
+                    row.ColorInput.SelectedIndex = index;
+                    UpdateColorPreview(row);
+                    return;
+                }
+            }
+            row.ColorInput.SelectedIndex = 0;
+            UpdateColorPreview(row);
+        }
+
+        private static void UpdateColorPreview(PeakRangeRow row)
+        {
+            PeakColorChoice choice = row.ColorInput.SelectedItem as PeakColorChoice;
+            row.ColorPreview.BackColor = choice == null ? Color.Black : choice.Color;
         }
     }
 }

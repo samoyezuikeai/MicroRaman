@@ -24,17 +24,12 @@ namespace MicroRaman
         private readonly List<ScanPoint> scanPoints = new List<ScanPoint>();
         private readonly HashSet<int> spectrumAvailableIndexes = new HashSet<int>();
         private readonly Dictionary<int, Color> mappingColors = new Dictionary<int, Color>();
-        private int hoveredScanIndex = -1;
-        private int selectedScanIndex = -1;
 
         /// <summary>
         /// 用户点击扫描矩阵中的一个点。
         /// </summary>
         internal event EventHandler<ScanPointSelectedEventArgs> ScanPointSelected;
 
-        /// <summary>
-        /// 执行 ScanMatrixPreviewControl 相关的内部处理。
-        /// </summary>
         internal ScanMatrixPreviewControl()
         {
             DoubleBuffered = true;
@@ -67,8 +62,6 @@ namespace MicroRaman
             scanPoints.Clear();
             spectrumAvailableIndexes.Clear();
             mappingColors.Clear();
-            hoveredScanIndex = -1;
-            selectedScanIndex = -1;
             for (int index = 0; index < points.Count; index++)
             {
                 PointF point = points[index];
@@ -99,8 +92,6 @@ namespace MicroRaman
             scanPoints.Clear();
             spectrumAvailableIndexes.Clear();
             mappingColors.Clear();
-            hoveredScanIndex = -1;
-            selectedScanIndex = -1;
             statusText = text;
             Invalidate();
         }
@@ -140,8 +131,6 @@ namespace MicroRaman
         {
             spectrumAvailableIndexes.Clear();
             mappingColors.Clear();
-            hoveredScanIndex = -1;
-            selectedScanIndex = -1;
             Cursor = Cursors.Default;
             Invalidate();
         }
@@ -152,6 +141,7 @@ namespace MicroRaman
         internal void SetMappingColors(IDictionary<int, Color> colors)
         {
             mappingColors.Clear();
+            Cursor = Cursors.Default;
             if (colors != null)
             {
                 foreach (KeyValuePair<int, Color> pair in colors)
@@ -187,61 +177,23 @@ namespace MicroRaman
                 return;
             }
 
-            Rectangle gridBounds;
-            if (!TryGetGridBounds(out gridBounds))
-                return;
-
-            DrawMappingCells(e.Graphics, gridBounds);
-
-            using (Pen border = new Pen(Color.DeepSkyBlue, 2f))
-            using (Pen grid = new Pen(Color.FromArgb(110, Color.Gray), 1f))
+            Rectangle gridBounds = GetGridBounds();
+            bool showMapping = mappingColors.Count > 0;
+            // Points are always cell centers. Keep the same half-cell outer extension
+            // before and after Mapping so the geometry never jumps between views.
+            if (showMapping)
             {
-                e.Graphics.DrawRectangle(border, gridBounds);
-                for (int column = 1; column < columnCount - 1; column++)
-                {
-                    float x = gridBounds.Left + gridBounds.Width * column / (float)(columnCount - 1);
-                    e.Graphics.DrawLine(grid, x, gridBounds.Top, x, gridBounds.Bottom);
-                }
-                for (int row = 1; row < rowCount - 1; row++)
-                {
-                    float y = gridBounds.Top + gridBounds.Height * row / (float)(rowCount - 1);
-                    e.Graphics.DrawLine(grid, gridBounds.Left, y, gridBounds.Right, y);
-                }
-
-                foreach (ScanPoint scanPoint in scanPoints)
-                {
-                    PointF pointLocation = GetPointLocation(gridBounds, scanPoint);
-                    bool selected = scanPoint.ScanIndex == selectedScanIndex;
-                    bool hovered = scanPoint.ScanIndex == hoveredScanIndex;
-                    bool available = spectrumAvailableIndexes.Contains(scanPoint.ScanIndex);
-                    Color color = selected ? Color.RoyalBlue
-                        : hovered ? Color.Gold
-                        : available ? Color.ForestGreen
-                        : Color.Red;
-                    using (Brush point = new SolidBrush(color))
-                    {
-                        if (!selected && !hovered)
-                        {
-                            // 普通红点和绿色点绘制为 2×2 像素，清晰可见且不遮挡 Mapping 色块。
-                            e.Graphics.FillRectangle(point,
-                                (int)Math.Round(pointLocation.X) - 1,
-                                (int)Math.Round(pointLocation.Y) - 1, 2, 2);
-                        }
-                        else
-                        {
-                            // 仅悬停或选中时临时放大；HitTest 仍保留 9 像素点击范围。
-                            float radius = selected ? 2.5f : 2f;
-                            e.Graphics.FillEllipse(point, pointLocation.X - radius, pointLocation.Y - radius,
-                                radius * 2, radius * 2);
-                        }
-                    }
-                }
+                DrawMappingCells(e.Graphics, gridBounds);
+            }
+            else
+            {
+                DrawMappingGrid(e.Graphics, gridBounds);
             }
 
-            TextRenderer.DrawText(e.Graphics, "X (mm)", Font,
+            TextRenderer.DrawText(e.Graphics, "X", Font,
                 new Rectangle(gridBounds.Left, gridBounds.Bottom + 8, gridBounds.Width, 22), Color.Black,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            TextRenderer.DrawText(e.Graphics, "Y (mm)", Font,
+            TextRenderer.DrawText(e.Graphics, "Y", Font,
                 new Rectangle(2, gridBounds.Top - 2, Math.Max(1, gridBounds.Left - 6), 22), Color.Black,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
@@ -251,14 +203,11 @@ namespace MicroRaman
         /// </summary>
         private void DrawMappingCells(Graphics graphics, Rectangle gridBounds)
         {
-            if (mappingColors.Count == 0)
-                return;
-
             foreach (ScanPoint scanPoint in scanPoints)
             {
                 Color color;
                 if (!mappingColors.TryGetValue(scanPoint.ScanIndex, out color))
-                    continue;
+                    color = Color.Black;
                 RectangleF cellBounds = GetMappingCellBounds(gridBounds, scanPoint);
                 using (Brush brush = new SolidBrush(color))
                     graphics.FillRectangle(brush, cellBounds);
@@ -266,50 +215,46 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// 点的颜色延伸到相邻点连线的中点：内部点覆盖四个相邻大格子的各四分之一， 边缘点则裁剪到框选矩形边界。
+        /// Draws every cell boundary in green and a stronger green outer border.
+        /// </summary>
+        private void DrawMappingGrid(Graphics graphics, Rectangle gridBounds)
+        {
+            using (Pen grid = new Pen(Color.FromArgb(180, Color.ForestGreen), 1f))
+            {
+                for (int column = 1; column < columnCount; column++)
+                {
+                    float x = gridBounds.Left
+                        + gridBounds.Width * column / (float)columnCount;
+                    graphics.DrawLine(grid, x, gridBounds.Top, x, gridBounds.Bottom);
+                }
+                for (int row = 1; row < rowCount; row++)
+                {
+                    float y = gridBounds.Top
+                        + gridBounds.Height * row / (float)rowCount;
+                    graphics.DrawLine(grid, gridBounds.Left, y, gridBounds.Right, y);
+                }
+            }
+
+            using (Pen border = new Pen(Color.ForestGreen, 2f))
+                graphics.DrawRectangle(border, gridBounds);
+        }
+
+        /// <summary>
+        /// Returns the full cell centered on a scan point; edge cells extend half a spacing
+        /// beyond the outermost point centers.
         /// </summary>
         private RectangleF GetMappingCellBounds(Rectangle gridBounds, ScanPoint scanPoint)
         {
-            float centerX = GetColumnCenter(gridBounds, scanPoint.Column);
-            float centerY = GetRowCenter(gridBounds, scanPoint.Row);
-            float left = scanPoint.Column == 0
-                ? gridBounds.Left
-                : (GetColumnCenter(gridBounds, scanPoint.Column - 1) + centerX) / 2f;
-            float right = scanPoint.Column == columnCount - 1
-                ? gridBounds.Right
-                : (centerX + GetColumnCenter(gridBounds, scanPoint.Column + 1)) / 2f;
-            float top = scanPoint.Row == 0
-                ? gridBounds.Top
-                : (GetRowCenter(gridBounds, scanPoint.Row - 1) + centerY) / 2f;
-            float bottom = scanPoint.Row == rowCount - 1
-                ? gridBounds.Bottom
-                : (centerY + GetRowCenter(gridBounds, scanPoint.Row + 1)) / 2f;
-            return RectangleF.FromLTRB(left, top, right, bottom);
+            float cellWidth = gridBounds.Width / (float)Math.Max(1, columnCount);
+            float cellHeight = gridBounds.Height / (float)Math.Max(1, rowCount);
+            return new RectangleF(
+                gridBounds.Left + scanPoint.Column * cellWidth,
+                gridBounds.Top + scanPoint.Row * cellHeight,
+                cellWidth,
+                cellHeight);
         }
 
-        /// <summary>
-        /// 获取ColumnCenter相关的内部处理。
-        /// </summary>
-        private float GetColumnCenter(Rectangle gridBounds, int column)
-        {
-            return columnCount == 1
-                ? gridBounds.Left + gridBounds.Width / 2f
-                : gridBounds.Left + gridBounds.Width * column / (float)(columnCount - 1);
-        }
-
-        /// <summary>
-        /// 获取RowCenter相关的内部处理。
-        /// </summary>
-        private float GetRowCenter(Rectangle gridBounds, int row)
-        {
-            return rowCount == 1
-                ? gridBounds.Top + gridBounds.Height / 2f
-                : gridBounds.Top + gridBounds.Height * row / (float)(rowCount - 1);
-        }
-
-        /// <summary>
-        /// 执行 AddDistinct 相关的内部处理。
-        /// </summary>
+        /// <summary>Adds a coordinate only when it is not already represented.</summary>
         private static void AddDistinct(List<float> values, float value)
         {
             foreach (float existing in values)
@@ -318,9 +263,7 @@ namespace MicroRaman
             values.Add(value);
         }
 
-        /// <summary>
-        /// 获取DistinctIndex相关的内部处理。
-        /// </summary>
+        /// <summary>Finds the tolerance-matched coordinate index.</summary>
         private static int GetDistinctIndex(List<float> values, float value)
         {
             for (int index = 0; index < values.Count; index++)
@@ -329,10 +272,8 @@ namespace MicroRaman
             return -1;
         }
 
-        /// <summary>
-        /// 尝试GetGridBounds相关的内部处理。
-        /// </summary>
-        private bool TryGetGridBounds(out Rectangle gridBounds)
+        /// <summary>Fits the complete outer cell rectangle into the control.</summary>
+        private Rectangle GetGridBounds()
         {
             const int leftMargin = 50;
             const int topMargin = 20;
@@ -341,28 +282,21 @@ namespace MicroRaman
             Rectangle available = Rectangle.FromLTRB(leftMargin, topMargin,
                 Math.Max(leftMargin + 1, ClientSize.Width - rightMargin),
                 Math.Max(topMargin + 1, ClientSize.Height - bottomMargin));
+            float displayAspectRatio = selectionAspectRatio
+                * columnCount / (float)Math.Max(1, columnCount - 1)
+                / (rowCount / (float)Math.Max(1, rowCount - 1));
+
             float width = available.Width;
-            float height = width / selectionAspectRatio;
+            float height = width / displayAspectRatio;
             if (height > available.Height)
             {
                 height = available.Height;
-                width = height * selectionAspectRatio;
+                width = height * displayAspectRatio;
             }
-            gridBounds = new Rectangle(
+            return new Rectangle(
                 available.Left + (int)((available.Width - width) / 2),
                 available.Top + (int)((available.Height - height) / 2),
                 Math.Max(1, (int)width), Math.Max(1, (int)height));
-            return true;
-        }
-
-        /// <summary>
-        /// 获取PointLocation相关的内部处理。
-        /// </summary>
-        private PointF GetPointLocation(Rectangle gridBounds, ScanPoint scanPoint)
-        {
-            return new PointF(
-                GetColumnCenter(gridBounds, scanPoint.Column),
-                GetRowCenter(gridBounds, scanPoint.Row));
         }
 
         /// <summary>
@@ -371,14 +305,15 @@ namespace MicroRaman
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            int scanIndex = HitTest(e.Location);
-            if (hoveredScanIndex == scanIndex)
+            if (mappingColors.Count == 0)
+            {
+                Cursor = Cursors.Default;
                 return;
-            hoveredScanIndex = scanIndex;
+            }
+            int scanIndex = HitTest(e.Location);
             Cursor = scanIndex >= 0 && spectrumAvailableIndexes.Contains(scanIndex)
                 ? Cursors.Hand
                 : Cursors.Default;
-            Invalidate();
         }
 
         /// <summary>
@@ -387,11 +322,7 @@ namespace MicroRaman
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            if (hoveredScanIndex < 0)
-                return;
-            hoveredScanIndex = -1;
             Cursor = Cursors.Default;
-            Invalidate();
         }
 
         /// <summary>
@@ -405,8 +336,6 @@ namespace MicroRaman
             int scanIndex = HitTest(e.Location);
             if (scanIndex < 0 || !spectrumAvailableIndexes.Contains(scanIndex))
                 return;
-            selectedScanIndex = scanIndex;
-            Invalidate();
             EventHandler<ScanPointSelectedEventArgs> handler = ScanPointSelected;
             if (handler != null)
                 handler(this, new ScanPointSelectedEventArgs(scanIndex));
@@ -417,20 +346,13 @@ namespace MicroRaman
         /// </summary>
         private int HitTest(Point location)
         {
-            if (scanPoints.Count == 0)
+            if (scanPoints.Count == 0 || mappingColors.Count == 0)
                 return -1;
-            Rectangle gridBounds;
-            if (!TryGetGridBounds(out gridBounds))
-                return -1;
-
-            const float hitRadius = 9f;
-            float hitRadiusSquared = hitRadius * hitRadius;
+            Rectangle gridBounds = GetGridBounds();
             foreach (ScanPoint scanPoint in scanPoints)
             {
-                PointF pointLocation = GetPointLocation(gridBounds, scanPoint);
-                float dx = location.X - pointLocation.X;
-                float dy = location.Y - pointLocation.Y;
-                if (dx * dx + dy * dy <= hitRadiusSquared)
+                if (mappingColors.ContainsKey(scanPoint.ScanIndex)
+                    && GetMappingCellBounds(gridBounds, scanPoint).Contains(location))
                     return scanPoint.ScanIndex;
             }
             return -1;
@@ -442,9 +364,6 @@ namespace MicroRaman
     /// </summary>
     internal sealed class ScanPointSelectedEventArgs : EventArgs
     {
-        /// <summary>
-        /// 执行 ScanPointSelectedEventArgs 相关的内部处理。
-        /// </summary>
         internal ScanPointSelectedEventArgs(int scanIndex)
         {
             ScanIndex = scanIndex;
@@ -453,4 +372,3 @@ namespace MicroRaman
         internal int ScanIndex { get; private set; }
     }
 }
-

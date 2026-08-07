@@ -87,13 +87,11 @@ namespace MicroRaman
         private double? savedCalibrationZ;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
-        private const int ScanPointSettlingDelayMilliseconds = 100;
+        private const int ScanPointSettlingDelayMilliseconds = 350;
         private const int LaserTecWarmupDelayMilliseconds = 5000;
-        private const int LaserOffBeforeMoveDelayMilliseconds = 100;
-        // 必须在亮谱积分开始前等待 LD 输出稳定；积分时间本身不能代替这段预稳定时间。
-        private const int LaserOnSettlingDelayMilliseconds = 300;
-        // 换行点在采暗谱期间 LD 关闭更久，重新开启后需要更长时间恢复稳定输出。
-        private const int LaserOnSettlingAfterDarkDelayMilliseconds = 800;
+        private const int LaserOffBeforeMoveDelayMilliseconds = 150;
+        // 暗谱和亮谱均由读谱入口丢弃首帧，并保证每帧至少持续 200 ms；
+        // 因此不再在扫描控制器中叠加固定的开关前后等待。
         private const double MaximumAllowedCenteringErrorPixels = 15.0;
         // 常规定标先使用三个独立点快速校验；误差较大时再自动执行完整九点微调。
         // 这样不会以牺牲坐标精度为代价缩短定标时间。
@@ -177,6 +175,8 @@ namespace MicroRaman
             savedImageWidth = camera.CameraImageWidth;
             savedImageHeight = camera.CameraImageHeight;
             savedCalibrationZ = origin.Z;
+            try
+            {
             progress.Report("快速复测定位精度");
             AlignmentVerificationResult verification = VerifyCenteringQuick(camera, progress, cancellationToken);
             if (verification.MaximumErrorPixels > FastVerificationTargetErrorPixels)
@@ -195,6 +195,13 @@ namespace MicroRaman
             }
             progress.Report(string.Format("标定完成（最大偏差 {0:F2} 像素）", verification.MaximumErrorPixels));
             return verification;
+            }
+            catch
+            {
+                // A failed verification must never leave a temporary calibration available for scanning.
+                ResetOrigin();
+                throw;
+            }
         }
 
         /// <summary>
@@ -290,7 +297,7 @@ namespace MicroRaman
             Action<bool> setTecOutput,
             Action<CancellationToken> warmUpSpectrum,
             Action captureDarkSpectrum,
-            int integrationTimeMilliseconds,
+            int laserPreAcquisitionDelayMilliseconds,
             Func<int, bool> acquireSpectrum)
         {
             if (!SerialPortManager.IsOpen)
@@ -307,8 +314,8 @@ namespace MicroRaman
                 throw new ArgumentNullException(nameof(warmUpSpectrum));
             if (captureDarkSpectrum == null)
                 throw new ArgumentNullException(nameof(captureDarkSpectrum));
-            if (integrationTimeMilliseconds <= 0)
-                throw new ArgumentOutOfRangeException(nameof(integrationTimeMilliseconds));
+            if (laserPreAcquisitionDelayMilliseconds < 0)
+                throw new ArgumentOutOfRangeException(nameof(laserPreAcquisitionDelayMilliseconds));
             if (acquireSpectrum == null)
                 throw new ArgumentNullException(nameof(acquireSpectrum));
             if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
@@ -359,14 +366,14 @@ namespace MicroRaman
                     VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
                     WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
-                    bool enteredNewRow = index > 0
-                        && Math.Abs(normalized.Y - normalizedPoints[index - 1].Y) > 0.000001f;
                     // 每一行只使用一张暗谱：第一点以及蛇形路径换行后的第一个点更新，
                     // 行内不再按时间切换背景基准，避免同一行出现人为的强度跳变。
-                    bool refreshDarkSpectrum = index == 0 || enteredNewRow;
+                    bool refreshDarkSpectrum = true;
                     long darkAcquisitionMilliseconds = 0;
                     if (refreshDarkSpectrum)
                     {
+                        // Force the dark acquisition to start with LD confirmed off and no prior bright frame queued.
+                        setLaserOutput(false);
                         progress.Report(string.Format("更新暗谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         Stopwatch darkTimer = Stopwatch.StartNew();
                         captureDarkSpectrum();
@@ -378,12 +385,12 @@ namespace MicroRaman
                     Stopwatch brightTimer = Stopwatch.StartNew();
                     try
                     {
-                        progress.Report(string.Format("开激光稳定中 {0}/{1}", index + 1, normalizedPoints.Count));
-                        WaitForScanDelay(
-                            refreshDarkSpectrum
-                                ? LaserOnSettlingAfterDarkDelayMilliseconds
-                                : LaserOnSettlingDelayMilliseconds,
-                            cancellationToken);
+                        if (laserPreAcquisitionDelayMilliseconds > 0)
+                        {
+                            progress.Report(string.Format(
+                                "激光稳定中 {0}/{1}", index + 1, normalizedPoints.Count));
+                            WaitForScanDelay(laserPreAcquisitionDelayMilliseconds, cancellationToken);
+                        }
                         progress.Report(string.Format("开激光采谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         acquireSpectrum(index);
                     }
@@ -823,8 +830,13 @@ namespace MicroRaman
         private void ReturnToScanOrigin(CameraShowForm camera, StagePosition origin, int[] dimensions)
         {
             command.MoveAbsoluteXY(origin.X, origin.Y);
+            // 平台返回起点后不能立刻切回实时画面。否则相机仍可能显示最后一个扫描点
+            // 的旧帧，造成冻结参考图中的框选区域和实时样品纹理看起来错位。
+            WaitForScanDelay(ScanPointSettlingDelayMilliseconds, CancellationToken.None);
+
             StagePosition actual = command.ReadPosition();
             VerifyPosition(origin, actual, dimensions);
+            camera.WaitForFreshFrames(2, 10000, CancellationToken.None);
             camera.SetTemporaryOverlayPixelOffset(0, 0);
         }
 
@@ -885,4 +897,3 @@ namespace MicroRaman
         }
     }
 }
-
