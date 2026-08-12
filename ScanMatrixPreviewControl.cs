@@ -99,14 +99,6 @@ namespace MicroRaman
         /// <summary>
         /// 把已完成开激光采谱的点标记为可点击回看。
         /// </summary>
-        internal void SetSpectrumAvailable(int scanIndex)
-        {
-            if (scanIndex < 0 || scanIndex >= scanPoints.Count)
-                return;
-            spectrumAvailableIndexes.Add(scanIndex);
-            Invalidate();
-        }
-
         /// <summary>
         /// 批量标记后台扫描刚完成的点，只触发一次重绘。
         /// </summary>
@@ -179,8 +171,7 @@ namespace MicroRaman
 
             Rectangle gridBounds = GetGridBounds();
             bool showMapping = mappingColors.Count > 0;
-            // Points are always cell centers. Keep the same half-cell outer extension
-            // before and after Mapping so the geometry never jumps between views.
+            // 扫描点始终位于格子中心；Mapping 前后都保留外侧半格，避免视图切换时几何位置跳动。
             if (showMapping)
             {
                 DrawMappingCells(e.Graphics, gridBounds);
@@ -207,7 +198,7 @@ namespace MicroRaman
             {
                 Color color;
                 if (!mappingColors.TryGetValue(scanPoint.ScanIndex, out color))
-                    color = Color.Black;
+                    color = Color.White;
                 RectangleF cellBounds = GetMappingCellBounds(gridBounds, scanPoint);
                 using (Brush brush = new SolidBrush(color))
                     graphics.FillRectangle(brush, cellBounds);
@@ -215,7 +206,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Draws every cell boundary in green and a stronger green outer border.
+        /// 使用绿色绘制所有格线，并用更醒目的绿色绘制外边框。
         /// </summary>
         private void DrawMappingGrid(Graphics graphics, Rectangle gridBounds)
         {
@@ -240,8 +231,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns the full cell centered on a scan point; edge cells extend half a spacing
-        /// beyond the outermost point centers.
+        /// 返回以扫描点为中心的完整格子；边缘格子向最外侧点中心之外延伸半个间距。
         /// </summary>
         private RectangleF GetMappingCellBounds(Rectangle gridBounds, ScanPoint scanPoint)
         {
@@ -254,7 +244,7 @@ namespace MicroRaman
                 cellHeight);
         }
 
-        /// <summary>Adds a coordinate only when it is not already represented.</summary>
+        /// <summary>仅在坐标尚未存在时添加。</summary>
         private static void AddDistinct(List<float> values, float value)
         {
             foreach (float existing in values)
@@ -263,7 +253,7 @@ namespace MicroRaman
             values.Add(value);
         }
 
-        /// <summary>Finds the tolerance-matched coordinate index.</summary>
+        /// <summary>查找容差范围内匹配的坐标索引。</summary>
         private static int GetDistinctIndex(List<float> values, float value)
         {
             for (int index = 0; index < values.Count; index++)
@@ -272,7 +262,7 @@ namespace MicroRaman
             return -1;
         }
 
-        /// <summary>Fits the complete outer cell rectangle into the control.</summary>
+        /// <summary>将完整的外层格子矩形等比放入控件。</summary>
         private Rectangle GetGridBounds()
         {
             const int leftMargin = 50;
@@ -305,7 +295,7 @@ namespace MicroRaman
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            if (mappingColors.Count == 0)
+            if (spectrumAvailableIndexes.Count == 0)
             {
                 Cursor = Cursors.Default;
                 return;
@@ -346,13 +336,12 @@ namespace MicroRaman
         /// </summary>
         private int HitTest(Point location)
         {
-            if (scanPoints.Count == 0 || mappingColors.Count == 0)
+            if (scanPoints.Count == 0)
                 return -1;
             Rectangle gridBounds = GetGridBounds();
             foreach (ScanPoint scanPoint in scanPoints)
             {
-                if (mappingColors.ContainsKey(scanPoint.ScanIndex)
-                    && GetMappingCellBounds(gridBounds, scanPoint).Contains(location))
+                if (GetMappingCellBounds(gridBounds, scanPoint).Contains(location))
                     return scanPoint.ScanIndex;
             }
             return -1;

@@ -1479,8 +1479,8 @@ namespace MicroRaman
                     int count = 0;
                     for (int y = sampleY; y < sampleY + sampleHeight; y++)
                     {
-                        // TUFRM_FMT_USUAl stores image rows bottom-up on Windows,
-                        // while the preview and mouse coordinates use a top-left origin.
+                        // TUFRM_FMT_USUAl 在 Windows 中自下而上存储图像行，
+                        // 而预览和鼠标坐标以左上角为原点。
                         int row = (height - 1 - y) * stride;
                         for (int x = sampleX; x < sampleX + sampleWidth; x++)
                         {
@@ -1661,4 +1661,3 @@ namespace MicroRaman
         }
     }
 }
-

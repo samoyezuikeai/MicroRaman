@@ -15,28 +15,34 @@ namespace MicroRaman
         Pca
     }
 
+    internal enum RamanPeakMetric
+    {
+        Height,
+        Area
+    }
+
     internal sealed class RamanPeakRange
     {
-        internal RamanPeakRange(double rangeStart, double rangeEnd)
-            : this(rangeStart, rangeEnd, Color.Empty)
-        {
-        }
-
-        internal RamanPeakRange(double rangeStart, double rangeEnd, Color color)
+        internal RamanPeakRange(
+            double rangeStart,
+            double rangeEnd,
+            Color color,
+            RamanPeakMetric metric)
         {
             RangeStart = rangeStart;
             RangeEnd = rangeEnd;
             Color = color;
+            Metric = metric;
         }
 
         internal double RangeStart { get; private set; }
         internal double RangeEnd { get; private set; }
         internal Color Color { get; private set; }
+        internal RamanPeakMetric Metric { get; private set; }
     }
 
     /// <summary>
-    /// Configures one or more target Raman peak ranges for the selected mapping mode.
-    /// Each saved row becomes one independently coloured mapping channel.
+    /// 配置一个或多个目标拉曼峰，每一行保存为独立的伪彩色通道。
     /// </summary>
     internal sealed class RamanMappingOptionsForm : Form
     {
@@ -45,6 +51,7 @@ namespace MicroRaman
             internal Label NameLabel;
             internal NumericUpDown StartInput;
             internal NumericUpDown EndInput;
+            internal ComboBox MetricInput;
             internal ComboBox ColorInput;
             internal Panel ColorPreview;
             internal Label Separator;
@@ -79,6 +86,8 @@ namespace MicroRaman
             new PeakColorChoice("红色", Color.FromArgb(220, 45, 40))
         };
         private bool changingColors;
+
+        internal bool Accepted { get; private set; }
 
         internal RamanMappingOptionsForm(
             RamanMappingMode mappingMode,
@@ -118,15 +127,14 @@ namespace MicroRaman
             okButton.Click += OkButton_Click;
             Button cancelButton = new Button
             {
-                DialogResult = DialogResult.Cancel,
                 Location = new Point(726, 300),
                 Size = new Size(86, 36),
                 Text = "取消"
             };
+            cancelButton.Click += (sender, args) => Close();
 
             Controls.AddRange(new Control[] { rowsPanel, addButton, okButton, cancelButton });
             AcceptButton = okButton;
-            CancelButton = cancelButton;
 
             bool requiresPeakRanges = RequiresPeakRanges(mappingMode);
             rowsPanel.Visible = requiresPeakRanges;
@@ -137,7 +145,7 @@ namespace MicroRaman
                 {
                     AutoSize = true,
                     Location = new Point(18, 19),
-                    Text = "设置目标波峰范围（cm⁻¹）"
+                    Text = "设置目标波峰参数（cm⁻¹）"
                 };
                 Controls.Add(header);
 
@@ -145,11 +153,15 @@ namespace MicroRaman
                 {
                     for (int index = 0; index < existingRanges.Count; index++)
                         AddPeakRangeRow(existingRanges[index].RangeStart,
-                            existingRanges[index].RangeEnd, existingRanges[index].Color);
+                            existingRanges[index].RangeEnd, existingRanges[index].Color,
+                            existingRanges[index].Metric);
                 }
                 else
                 {
-                    AddPeakRangeRow(500.0, 540.0, peakColorChoices[0].Color);
+                    AddPeakRangeRow(500.0, 540.0, peakColorChoices[0].Color,
+                        mappingMode == RamanMappingMode.PeakArea
+                            ? RamanPeakMetric.Area
+                            : RamanPeakMetric.Height);
                 }
             }
         }
@@ -171,7 +183,7 @@ namespace MicroRaman
         {
             switch (mode)
             {
-                case RamanMappingMode.PeakHeight: return "峰高（强度）";
+                case RamanMappingMode.PeakHeight: return "峰高峰面积";
                 case RamanMappingMode.PeakArea: return "峰面积";
                 case RamanMappingMode.PeakPosition: return "峰位置";
                 case RamanMappingMode.PeakWidth: return "半高宽 FWHM";
@@ -192,10 +204,18 @@ namespace MicroRaman
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            AddPeakRangeRow(start, end, nextColor);
+            RamanPeakMetric nextMetric = rows.Count > 0
+                && rows[rows.Count - 1].MetricInput.SelectedIndex == 1
+                    ? RamanPeakMetric.Area
+                    : RamanPeakMetric.Height;
+            AddPeakRangeRow(start, end, nextColor, nextMetric);
         }
 
-        private void AddPeakRangeRow(double suggestedStart, double suggestedEnd, Color suggestedColor)
+        private void AddPeakRangeRow(
+            double suggestedStart,
+            double suggestedEnd,
+            Color suggestedColor,
+            RamanPeakMetric suggestedMetric)
         {
             PeakRangeRow row = new PeakRangeRow
             {
@@ -212,7 +232,13 @@ namespace MicroRaman
                     Maximum = 3500M,
                     Location = new Point(105, 0),
                     Size = new Size(150, 30),
-                    Value = ClampDecimal(suggestedStart, -500M, 3500M)
+                    Value = ClampDecimal(
+                        suggestedMetric == RamanPeakMetric.Height
+                            && suggestedEnd > suggestedStart
+                                ? (suggestedStart + suggestedEnd) * 0.5
+                                : suggestedStart,
+                        -500M,
+                        3500M)
                 },
                 EndInput = new NumericUpDown
                 {
@@ -224,22 +250,28 @@ namespace MicroRaman
                     Size = new Size(150, 30),
                     Value = ClampDecimal(suggestedEnd, -500M, 3500M)
                 },
+                MetricInput = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(490, 0),
+                    Size = new Size(92, 30)
+                },
                 ColorInput = new ComboBox
                 {
                     DropDownStyle = ComboBoxStyle.DropDownList,
-                    Location = new Point(510, 0),
-                    Size = new Size(118, 30)
+                    Location = new Point(590, 0),
+                    Size = new Size(92, 30)
                 },
                 ColorPreview = new Panel
                 {
                     BorderStyle = BorderStyle.FixedSingle,
-                    Location = new Point(642, 0),
-                    Size = new Size(48, 24)
+                    Location = new Point(690, 0),
+                    Size = new Size(32, 24)
                 },
                 DeleteButton = new Button
                 {
-                    Location = new Point(704, 0),
-                    Size = new Size(70, 30),
+                    Location = new Point(730, 0),
+                    Size = new Size(54, 30),
                     Text = "删除"
                 }
             };
@@ -250,15 +282,21 @@ namespace MicroRaman
                 Text = "至"
             };
             rows.Add(row);
+            row.MetricInput.Items.AddRange(new object[] { "峰高", "峰面积" });
+            row.MetricInput.Visible = mappingMode == RamanMappingMode.PeakHeight
+                || mappingMode == RamanMappingMode.PeakArea;
             for (int index = 0; index < peakColorChoices.Count; index++)
                 row.ColorInput.Items.Add(peakColorChoices[index]);
             SelectColor(row, suggestedColor);
+            row.MetricInput.SelectedIndex = suggestedMetric == RamanPeakMetric.Area ? 1 : 0;
+            UpdateMetricLayout(row, false);
+            row.MetricInput.SelectedIndexChanged += MetricInput_SelectedIndexChanged;
             row.ColorInput.SelectedIndexChanged += ColorInput_SelectedIndexChanged;
             row.DeleteButton.Click += DeleteButton_Click;
             rowsPanel.Controls.AddRange(new Control[]
             {
                 row.NameLabel, row.StartInput, row.Separator, row.EndInput,
-                row.ColorInput, row.ColorPreview, row.DeleteButton
+                row.MetricInput, row.ColorInput, row.ColorPreview, row.DeleteButton
             });
             LayoutRows();
         }
@@ -273,7 +311,7 @@ namespace MicroRaman
             foreach (Control control in new Control[]
             {
                 row.NameLabel, row.StartInput, row.Separator, row.EndInput,
-                row.ColorInput, row.ColorPreview, row.DeleteButton
+                row.MetricInput, row.ColorInput, row.ColorPreview, row.DeleteButton
             })
             {
                 rowsPanel.Controls.Remove(control);
@@ -288,14 +326,17 @@ namespace MicroRaman
             {
                 PeakRangeRow row = rows[index];
                 int top = 12 + index * 46;
-                row.NameLabel.Text = "波峰" + (index + 1);
+                bool useArea = row.MetricInput.SelectedIndex == 1;
+                row.NameLabel.Text = "波峰" + (index + 1)
+                    + (useArea ? " 范围" : " 位置");
                 row.NameLabel.Location = new Point(12, top + 7);
                 row.StartInput.Location = new Point(105, top);
                 row.Separator.Location = new Point(278, top + 7);
                 row.EndInput.Location = new Point(330, top);
-                row.ColorInput.Location = new Point(510, top);
-                row.ColorPreview.Location = new Point(642, top + 3);
-                row.DeleteButton.Location = new Point(704, top);
+                row.MetricInput.Location = new Point(490, top);
+                row.ColorInput.Location = new Point(590, top);
+                row.ColorPreview.Location = new Point(690, top + 3);
+                row.DeleteButton.Location = new Point(730, top);
                 row.DeleteButton.Enabled = rows.Count > 1;
             }
             rowsPanel.AutoScrollMinSize = new Size(0, 12 + rows.Count * 46 + 4);
@@ -309,18 +350,23 @@ namespace MicroRaman
                 for (int index = 0; index < rows.Count; index++)
                 {
                     double start = (double)rows[index].StartInput.Value;
-                    double end = (double)rows[index].EndInput.Value;
-                    if (end <= start)
+                    RamanPeakMetric metric = rows[index].MetricInput.SelectedIndex == 1
+                        ? RamanPeakMetric.Area
+                        : RamanPeakMetric.Height;
+                    double end = metric == RamanPeakMetric.Area
+                        ? (double)rows[index].EndInput.Value
+                        : start;
+                    if (metric == RamanPeakMetric.Area && end <= start)
                     {
                         MessageBox.Show(this,
                             "波峰" + (index + 1) + "的终点必须大于起点。",
                             Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
-                    if (end - start < 2.0)
+                    if (metric == RamanPeakMetric.Area && end - start < 20.0)
                     {
                         MessageBox.Show(this,
-                            "波峰" + (index + 1) + "的范围至少需要 2 cm⁻¹。",
+                            "波峰" + (index + 1) + "的范围至少需要 20 cm⁻¹。",
                             Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -341,10 +387,42 @@ namespace MicroRaman
                             return;
                         }
                     }
-                    peakRanges.Add(new RamanPeakRange(start, end, choice.Color));
+                    peakRanges.Add(new RamanPeakRange(start, end, choice.Color, metric));
                 }
             }
-            DialogResult = DialogResult.OK;
+            Accepted = true;
+            Close();
+        }
+
+        private void MetricInput_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            PeakRangeRow row = rows.Find(item => item.MetricInput == sender);
+            if (row == null)
+                return;
+            UpdateMetricLayout(row, true);
+            LayoutRows();
+        }
+
+        private static void UpdateMetricLayout(PeakRangeRow row, bool convertValues)
+        {
+            bool useArea = row.MetricInput.SelectedIndex == 1;
+            if (convertValues)
+            {
+                if (useArea)
+                {
+                    decimal center = row.StartInput.Value;
+                    row.StartInput.Value = Math.Max(row.StartInput.Minimum, center - 20M);
+                    row.EndInput.Value = Math.Min(row.EndInput.Maximum, center + 20M);
+                }
+                else
+                {
+                    row.StartInput.Value = (row.StartInput.Value + row.EndInput.Value) / 2M;
+                }
+            }
+            row.Separator.Visible = useArea;
+            row.EndInput.Visible = useArea;
+            row.StartInput.Size = useArea ? new Size(150, 30) : new Size(375, 30);
+            row.StartInput.AccessibleName = useArea ? "范围起点" : "波峰位置";
         }
 
         private static decimal ClampDecimal(double value, decimal minimum, decimal maximum)

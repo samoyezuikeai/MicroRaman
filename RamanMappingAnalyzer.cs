@@ -5,27 +5,26 @@ using System.Drawing;
 namespace MicroRaman
 {
     /// <summary>
-    /// Contains every Raman mapping calculation used by the application.
-    /// The nested data/result types keep mapping implementation in one place.
+    /// 集中实现应用程序使用的全部拉曼 Mapping 计算。
+    /// 嵌套的数据与结果类型使 Mapping 实现保持内聚。
     /// </summary>
     internal static class RamanMappingAnalyzer
     {
         private const double MinimumRamanShift = 100.0;
         private const double MaximumRamanShift = 3100.0;
-        // Fixed raw peak-height scale for channel opacity.  This is deliberately not
-        // derived from the current map, so every cell uses the same colour standard.
-        // All mapping spectra are converted to a 1000 ms equivalent exposure before
-        // analysis.  These fixed floors therefore keep an all-weak map dark instead of
-        // auto-stretching it into bright blue.
+        // 通道亮度使用固定的原始峰高尺度，不从当前图像动态推导，使所有格子遵循同一颜色标准。
+        // 所有 Mapping 光谱在分析前换算到 1000 ms 等效曝光；固定下限可防止全弱峰图被拉伸成亮色。
         private const double MidPeakStrength = 1000.0;
         private const double MinimumAreaStrengthPerRamanShift = 250.0;
         private const double StableColorLevelCount = 32.0;
-        // Spectral-angle threshold after robust denoising. A slightly wider tolerance is
-        // required at short integration times; genuinely different peak positions still
-        // produce a much lower cosine similarity than this value.
+        private const double AutomaticPeakSearchHalfWidth = 40.0;
+        private const double AutomaticPeakBoundaryHalfWidth = 100.0;
+        // 已确认的低强度峰至少保留约 10% 亮度，使其弱于普通峰但仍能与白色无信号背景区分。
+        private const double MinimumDetectedPeakOpacity = 0.10;
+        // 稳健降噪后的光谱夹角阈值。短积分时间需要略宽容差；真正不同的峰位仍会产生远低于此值的余弦相似度。
         private const double MaterialProfileSimilarityThreshold = 0.82;
         private const int MaximumMaterialGroupCount = 6;
-        private static readonly Color BackgroundColor = Color.Black;
+        private static readonly Color BackgroundColor = Color.White;
         private static readonly Color[] MaterialColors =
         {
             Color.FromArgb(220, 45, 45),
@@ -37,7 +36,7 @@ namespace MicroRaman
         };
 
         /// <summary>
-        /// A saved spectrum associated with one completed scan point.
+        /// 一个已完成扫描点所对应的保存光谱。
         /// </summary>
         internal sealed class Spectrum
         {
@@ -54,52 +53,52 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// One user-configured Raman peak channel. Its color is mixed with every other
-        /// detected channel at the same scan point.
+        /// 用户配置的单个拉曼峰通道；其颜色会与同一扫描点检测到的其他通道混合。
         /// </summary>
         internal sealed class PeakDefinition
         {
-            internal PeakDefinition(double rangeStart, double rangeEnd, Color color)
+            internal PeakDefinition(
+                double rangeStart,
+                double rangeEnd,
+                Color color,
+                RamanPeakMetric metric)
             {
                 RangeStart = rangeStart;
                 RangeEnd = rangeEnd;
                 Color = color;
+                Metric = metric;
             }
 
             internal double RangeStart { get; private set; }
             internal double RangeEnd { get; private set; }
             internal Color Color { get; private set; }
+            internal RamanPeakMetric Metric { get; private set; }
         }
 
         /// <summary>
-        /// Result shared by all peak-based mapping modes.
+        /// 所有基于波峰的 Mapping 模式共用的结果。
         /// </summary>
         internal sealed class PeakMappingResult
         {
             internal IDictionary<int, Color> Colors { get; set; }
-            internal double TargetShift { get; set; }
-            internal double HalfWidth { get; set; }
             internal string MetricDisplayName { get; set; }
         }
 
         /// <summary>
-        /// Result for whole-spectrum difference mapping.
+        /// 全谱差异 Mapping 的结果。
         /// </summary>
         internal sealed class FullSpectrumDifferenceMappingResult
         {
             internal IDictionary<int, Color> Colors { get; set; }
-            internal double ContrastRatio { get; set; }
-            internal double QualityScore { get; set; }
         }
 
         /// <summary>
-        /// Result for PCA whole-spectrum anomaly mapping.
+        /// PCA 全谱异常 Mapping 的结果。
         /// </summary>
         internal sealed class PcaMappingResult
         {
             internal IDictionary<int, Color> Colors { get; set; }
             internal int ComponentCount { get; set; }
-            internal double QualityScore { get; set; }
         }
 
         private struct PeakMeasurement
@@ -117,7 +116,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Represents one automatically detected material class using a normalized full-spectrum profile.
+        /// 使用归一化全谱轮廓表示一个自动识别的材料类别。
         /// </summary>
         private sealed class MaterialGroup
         {
@@ -129,8 +128,7 @@ namespace MicroRaman
         /// A material class defined only by the strongest peak inside the user-selected interval.
         /// </summary>
         /// <summary>
-        /// Removes a slowly varying fluorescence/background baseline.
-        /// This is used by the displayed spectrum and PCA processing.
+        /// 去除缓慢变化的荧光或背景基线，供光谱显示和 PCA 处理使用。
         /// </summary>
         internal static double[] RemoveBaseline(double[] intensities)
         {
@@ -153,7 +151,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Replaces isolated one-pixel cosmic-ray spikes before smoothing.
+        /// 在平滑前替换孤立的单像素宇宙射线尖峰。
         /// A real Raman band is preserved because both of its immediate neighbors must be quiet.
         /// </summary>
         internal static double[] RemoveCosmicRaySpikes(double[] intensities)
@@ -200,8 +198,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Maps every configured peak into its own color channel. Signal strength controls
-        /// channel opacity over black; simultaneous peak channels are hue-mixed per cell.
+        /// 将每个配置波峰映射到独立颜色通道；信号强度控制通道亮度，同一格子的多个波峰按色相混合。
         /// </summary>
         internal static PeakMappingResult AnalyzePeaks(
             IList<Spectrum> spectra,
@@ -218,22 +215,32 @@ namespace MicroRaman
             for (int peakIndex = 0; peakIndex < peakDefinitions.Count; peakIndex++)
             {
                 PeakDefinition definition = peakDefinitions[peakIndex];
-                if (definition.RangeEnd - definition.RangeStart < 2.0)
+                if (definition.Metric == RamanPeakMetric.Area
+                    && definition.RangeEnd - definition.RangeStart < 2.0)
                     throw new ArgumentOutOfRangeException(nameof(peakDefinitions));
 
                 List<double> detectedStrengths = new List<double>();
                 for (int row = 0; row < spectra.Count; row++)
                 {
-                    PeakMeasurement measurement = MeasurePeak(
-                        spectra[row].RamanShifts, spectra[row].Intensities,
-                        definition.RangeStart, definition.RangeEnd);
+                    PeakMeasurement measurement = definition.Metric == RamanPeakMetric.Height
+                        ? MeasurePeakAtPosition(
+                            spectra[row].RamanShifts,
+                            spectra[row].Intensities,
+                            definition.RangeStart)
+                        : MeasurePeak(
+                            spectra[row].RamanShifts,
+                            spectra[row].Intensities,
+                            definition.RangeStart,
+                            definition.RangeEnd,
+                            true);
                     measurements[row, peakIndex] = measurement;
-                    double strength = GetPeakStrength(measurement, mappingMode);
+                    RamanMappingMode peakMode = GetPeakMode(definition, mappingMode);
+                    double strength = GetPeakStrength(measurement, peakMode);
                     if (IsFinite(strength) && strength > 0.0)
                         detectedStrengths.Add(strength);
                 }
                 opacityReferences[peakIndex] = GetOpacityReference(
-                    detectedStrengths, definition, mappingMode);
+                    detectedStrengths, definition, GetPeakMode(definition, mappingMode));
             }
 
             Dictionary<int, Color> colors = new Dictionary<int, Color>();
@@ -243,7 +250,9 @@ namespace MicroRaman
                 List<double> channelOpacities = new List<double>();
                 for (int peakIndex = 0; peakIndex < peakDefinitions.Count; peakIndex++)
                 {
-                    double strength = GetPeakStrength(measurements[row, peakIndex], mappingMode);
+                    PeakDefinition definition = peakDefinitions[peakIndex];
+                    double strength = GetPeakStrength(
+                        measurements[row, peakIndex], GetPeakMode(definition, mappingMode));
                     double opacity = GetStableOpacity(strength, opacityReferences[peakIndex]);
                     if (opacity <= 0.0)
                         continue;
@@ -253,19 +262,15 @@ namespace MicroRaman
                 colors[spectra[row].ScanIndex] = MixPeakChannels(channelColors, channelOpacities);
             }
 
-            PeakDefinition firstPeak = peakDefinitions[0];
             return new PeakMappingResult
             {
                 Colors = colors,
-                TargetShift = (firstPeak.RangeStart + firstPeak.RangeEnd) * 0.5,
-                HalfWidth = (firstPeak.RangeEnd - firstPeak.RangeStart) * 0.5,
                 MetricDisplayName = GetMetricDisplayName(mappingMode)
             };
         }
 
         /// <summary>
-        /// Maps the RMS difference between each raw spectrum and the median spectrum.
-        /// The algorithm is unchanged; it has only been moved into this class.
+        /// 映射每条原始光谱与中位光谱之间的均方根差异。
         /// </summary>
         internal static FullSpectrumDifferenceMappingResult AnalyzeFullSpectrumDifference(
             IList<Spectrum> spectra)
@@ -318,15 +323,12 @@ namespace MicroRaman
 
             return new FullSpectrumDifferenceMappingResult
             {
-                Colors = BuildMaterialAwareColors(spectra, scores, colorStart, colorEnd),
-                ContrastRatio = colorEnd / Math.Max(1e-9, center),
-                QualityScore = Math.Max(0.0, (Percentile(scores, 0.98) - center) / sigma)
+                Colors = BuildMaterialAwareColors(spectra, scores, colorStart, colorEnd)
             };
         }
 
         /// <summary>
-        /// Maps robust distance in the first principal components of baseline-corrected spectra.
-        /// The PCA method is unchanged; shared numerical helpers are used instead of duplicates.
+        /// 映射基线校正光谱前几个主成分中的稳健距离。
         /// </summary>
         internal static PcaMappingResult AnalyzePca(IList<Spectrum> spectra)
         {
@@ -395,22 +397,20 @@ namespace MicroRaman
             return new PcaMappingResult
             {
                 Colors = BuildMaterialAwareColors(spectra, distances, colorStart, colorEnd),
-                ComponentCount = componentCount,
-                QualityScore = Math.Max(0.0, (Percentile(distances, 0.98) - center) / sigma)
+                ComponentCount = componentCount
             };
         }
 
         /// <summary>
-        /// Measures one selected Raman window against the robust background of the complete
-        /// spectrum.  A material channel is present when this window contains a point
-        /// clearly above the spectrum's ordinary background; it does not need to be the
-        /// strongest band in the full spectrum.
+        /// 相对全谱稳健背景测量选定的拉曼窗口。窗口内只要存在明显高于普通背景的点，
+        /// 即视为材料通道存在，不要求它是全谱最强峰。
         /// </summary>
         private static PeakMeasurement MeasurePeak(
             double[] shifts,
             double[] intensities,
             double rangeStart,
-            double rangeEnd)
+            double rangeEnd,
+            bool integrateEntireRange = false)
         {
             if (rangeEnd <= rangeStart)
                 return InvalidPeak();
@@ -435,9 +435,7 @@ namespace MicroRaman
             CalculateWholeSpectrumBackground(
                 shifts, intensities, out spectrumBackground, out spectrumVariation);
 
-            // The local baseline is only the two edge levels of the user-selected window.
-            // It prevents a broad raised background from masquerading as a peak for this
-            // particular material channel.
+            // 局部基线仅由用户窗口两端的水平确定，避免宽阔抬升背景被误判为该材料通道的波峰。
             double leftBaseline = MedianEdge(peakPoints, true);
             double rightBaseline = MedianEdge(peakPoints, false);
             double rangeWidth = rangeEnd - rangeStart;
@@ -462,9 +460,11 @@ namespace MicroRaman
                 return InvalidPeak();
             double position = InterpolatePeakPosition(peakPoints, corrected, maximumIndex);
             double width = CalculateFwhm(peakPoints, corrected, maximumIndex, height);
-            if (!IsFinite(width) || width <= 0.0)
+            if (!integrateEntireRange && (!IsFinite(width) || width <= 0.0))
                 return InvalidPeak();
-            double area = CalculatePeakArea(peakPoints, corrected, maximumIndex, height);
+            double area = integrateEntireRange
+                ? CalculateEntireRangeArea(peakPoints, corrected)
+                : CalculatePeakArea(peakPoints, corrected, maximumIndex, height);
             return new PeakMeasurement
             {
                 Height = height,
@@ -475,9 +475,66 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Gets the ordinary background and its robust point-to-point spread from the
-        /// entire usable Raman spectrum.  This is used only to decide whether a selected
-        /// window contains a real elevated peak; it never affects channel opacity.
+        /// 定位最接近用户输入拉曼位置的峰顶，再向两侧扩展到首个局部谷底，并在该窗口内测量峰高。
+        /// </summary>
+        private static PeakMeasurement MeasurePeakAtPosition(
+            double[] shifts,
+            double[] intensities,
+            double targetPosition)
+        {
+            List<PeakPoint> points = new List<PeakPoint>();
+            for (int index = 0; index < shifts.Length && index < intensities.Length; index++)
+            {
+                if (IsFinite(shifts[index]) && IsFinite(intensities[index])
+                    && Math.Abs(shifts[index] - targetPosition) <= AutomaticPeakBoundaryHalfWidth)
+                    points.Add(new PeakPoint { Shift = shifts[index], Value = intensities[index] });
+            }
+            points.Sort((first, second) => first.Shift.CompareTo(second.Shift));
+            if (points.Count < 5)
+                return InvalidPeak();
+
+            int apex = -1;
+            for (int index = 1; index < points.Count - 1; index++)
+            {
+                if (Math.Abs(points[index].Shift - targetPosition) > AutomaticPeakSearchHalfWidth)
+                    continue;
+                if (points[index].Value >= points[index - 1].Value
+                    && points[index].Value >= points[index + 1].Value
+                    && (apex < 0 || points[index].Value > points[apex].Value))
+                    apex = index;
+            }
+            if (apex < 1 || apex >= points.Count - 1)
+                return InvalidPeak();
+
+            int left = apex - 1;
+            while (left > 0 && points[left - 1].Value <= points[left].Value)
+                left--;
+            int right = apex + 1;
+            while (right < points.Count - 1 && points[right + 1].Value <= points[right].Value)
+                right++;
+            if (left >= apex || right <= apex || right - left < 2)
+                return InvalidPeak();
+
+            return MeasurePeak(shifts, intensities, points[left].Shift, points[right].Shift);
+        }
+
+        private static double CalculateEntireRangeArea(
+            IList<PeakPoint> points,
+            IList<double> values)
+        {
+            double area = 0.0;
+            for (int index = 1; index < points.Count; index++)
+            {
+                double dx = Math.Abs(points[index].Shift - points[index - 1].Shift);
+                area += (Math.Max(0.0, values[index - 1])
+                    + Math.Max(0.0, values[index])) * 0.5 * dx;
+            }
+            return area;
+        }
+
+        /// <summary>
+        /// 从完整有效拉曼光谱计算普通背景及稳健离散程度，仅用于判断窗口内是否存在真实抬升峰，
+        /// 不参与通道亮度计算。
         /// </summary>
         private static void CalculateWholeSpectrumBackground(
             double[] shifts,
@@ -498,7 +555,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns the median of the lowest-shift or highest-shift tenth of the selected range.
+        /// 返回选定范围最低位移端或最高位移端十分之一数据的中位数。
         /// </summary>
         private static double MedianEdge(IList<PeakPoint> points, bool firstEdge)
         {
@@ -525,7 +582,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Locates the strongest locally-baseline-corrected sample in the target interval.
+        /// 定位目标区间内经局部基线校正后的最强采样点。
         /// </summary>
         private static int GetMaximumIndex(IList<double> values)
         {
@@ -537,9 +594,8 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Integrates only the connected main-peak lobe above a small fraction of its height.
-        /// This prevents positive baseline noise across a wide search window from accumulating
-        /// into a large, spatially unstable area while preserving genuine peak-width changes.
+        /// 仅积分高于峰高小比例阈值的连续主峰区域，避免宽搜索窗口中的正基线噪声累积成
+        /// 空间不稳定的大面积，同时保留真实峰宽变化。
         /// </summary>
         private static double CalculatePeakArea(
             IList<PeakPoint> points,
@@ -547,8 +603,7 @@ namespace MicroRaman
             int maximumIndex,
             double height)
         {
-            // Integrate the connected lobe only.  The peak existence test above already
-            // excludes flat/noise-only windows, so no local-noise threshold is used here.
+            // 只积分连续峰瓣；前面的峰存在性检查已排除平坦或纯噪声窗口，此处无需再设局部噪声阈值。
             double floor = height * 0.02;
 
             int leftIndex = maximumIndex;
@@ -575,7 +630,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Refines the sampled peak position with a three-point parabolic interpolation.
+        /// 使用三点抛物线插值细化采样峰位。
         /// </summary>
         private static double InterpolatePeakPosition(
             IList<PeakPoint> points,
@@ -600,7 +655,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Calculates FWHM only when both half-height crossings lie inside the chosen range.
+        /// 仅当左右半高交点均位于选定范围内时计算半高宽。
         /// </summary>
         private static double CalculateFwhm(
             IList<PeakPoint> points,
@@ -637,14 +692,14 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns the display name used by the mapping panel title.
+        /// 返回 Mapping 面板标题使用的指标名称。
         /// </summary>
         private static string GetMetricDisplayName(RamanMappingMode mode)
         {
             switch (mode)
             {
-                case RamanMappingMode.PeakHeight: return "Peak height";
-                case RamanMappingMode.PeakArea: return "Peak area";
+                case RamanMappingMode.PeakHeight: return "Peak height / area";
+                case RamanMappingMode.PeakArea: return "Peak height / area";
                 case RamanMappingMode.PeakPosition: return "Peak position";
                 case RamanMappingMode.PeakWidth: return "FWHM";
                 default: return "Peak metric";
@@ -652,19 +707,19 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Converts a confirmed peak's normalized strength to a stable channel opacity.
+        /// 将已确认波峰的归一化强度转换为稳定的通道亮度。
         /// </summary>
         private static double GetStableOpacity(double strength, double opacityReference)
         {
             if (!IsFinite(strength) || strength <= 0.0)
                 return 0.0;
             double reference = Math.Max(1e-9, opacityReference);
-            // The robust reference represents a clearly detected peak, so it should look
-            // clearly coloured rather than half-transparent.  The exponential response is
-            // continuous, keeps weaker peaks visibly darker, and approaches full opacity
-            // smoothly without making one outlier redefine the whole map.
+            // 稳健参考值代表清晰波峰，应呈现明确颜色。指数响应连续地压暗弱峰并平滑趋近满亮度，
+            // 同时避免单个离群值重新定义整张图的颜色尺度。
             double opacity = 1.0 - Math.Exp(-2.3 * strength / reference);
-            return Math.Round(opacity * StableColorLevelCount) / StableColorLevelCount;
+            double stableOpacity = Math.Round(opacity * StableColorLevelCount)
+                / StableColorLevelCount;
+            return Math.Max(MinimumDetectedPeakOpacity, stableOpacity);
         }
 
         private static double GetPeakStrength(PeakMeasurement measurement, RamanMappingMode mode)
@@ -674,11 +729,23 @@ namespace MicroRaman
                 : measurement.Height;
         }
 
+        private static RamanMappingMode GetPeakMode(
+            PeakDefinition definition,
+            RamanMappingMode mappingMode)
+        {
+            if (mappingMode == RamanMappingMode.PeakHeight
+                || mappingMode == RamanMappingMode.PeakArea)
+            {
+                return definition.Metric == RamanPeakMetric.Area
+                    ? RamanMappingMode.PeakArea
+                    : RamanMappingMode.PeakHeight;
+            }
+            return mappingMode;
+        }
+
         /// <summary>
-        /// Uses a high robust percentile of confirmed peaks as a scan-level gain
-        /// normalizer, while retaining a fixed physical floor.  A global exposure/laser
-        /// multiplier therefore does not alter relative opacity, but a map containing only
-        /// genuinely weak peaks cannot be stretched into a bright map.
+        /// 使用已确认波峰的稳健高百分位作为扫描级增益基准，同时保留固定物理下限。
+        /// 因此整体曝光或激光倍率不会改变相对亮度，而只有真实弱峰的图也不会被拉伸成亮色。
         /// </summary>
         private static double GetOpacityReference(
             IList<double> detectedStrengths,
@@ -699,16 +766,15 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Combines multiple peak-color channels over black. Hue is weighted by opacity so
-        /// yellow plus blue produces the expected green-family mixed channel rather than one
-        /// channel simply overwriting the other.
+        /// 按亮度权重混合多个波峰颜色通道，例如黄色与蓝色会得到预期的绿色系，
+        /// 而不是由其中一个通道直接覆盖另一个。
         /// </summary>
         private static Color MixPeakChannels(
             IList<Color> channelColors,
             IList<double> channelOpacities)
         {
             if (channelColors == null || channelColors.Count == 0)
-                return Color.Black;
+                return BackgroundColor;
 
             double cosine = 0.0;
             double sine = 0.0;
@@ -735,7 +801,7 @@ namespace MicroRaman
                 remainingTransparency *= 1.0 - opacity;
             }
             if (weight <= 0.0)
-                return Color.Black;
+                return BackgroundColor;
 
             double hueDegrees = Math.Abs(cosine) < 1e-12 && Math.Abs(sine) < 1e-12
                 ? fallbackHue
@@ -796,8 +862,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Colors material classes by full-spectrum shape and varies only lightness within one class.
-        /// A scalar mapping value controls the shade; it never changes a point into another material color.
+        /// 按全谱形状为材料类别着色，同一类别内只改变明度；标量 Mapping 值不会改变材料色相。
         /// </summary>
         private static Dictionary<int, Color> BuildMaterialAwareColors(
             IList<Spectrum> spectra,
@@ -836,8 +901,8 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Separates signal spectra only when their normalized Raman-band shapes differ substantially.
-        /// Amplitude is removed before comparison, so a weak and strong spectrum of the same material share a hue.
+        /// 仅当归一化拉曼带形状差异明显时才分离信号光谱。比较前去除幅度影响，
+        /// 因此同一材料的强弱光谱共享相同色相。
         /// </summary>
         private static List<MaterialGroup> BuildMaterialGroups(
             IList<Spectrum> spectra,
@@ -881,8 +946,8 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Builds unit-length profiles from the stored, dark-subtracted and baseline-corrected Raman spectra.
-        /// A final cosmic-spike pass prevents one bad CCD pixel from being treated as a new material.
+        /// 从已保存、扣暗谱并校正基线的拉曼光谱构建单位长度轮廓；
+        /// 最后一次去尖峰可避免坏 CCD 像素被误判为新材料。
         /// </summary>
         private static double[][] BuildNormalizedMaterialProfiles(IList<Spectrum> spectra)
         {
@@ -915,8 +980,8 @@ namespace MicroRaman
                     normSquared += profile[column] * profile[column];
                 }
 
-                // Very weak but locally validated peaks still need a comparable profile.
-                // Fall back to median-centered positive values if the robust floor removed all samples.
+                // 极弱但已通过局部验证的波峰仍需可比较轮廓；若稳健下限移除了全部样本，
+                // 则回退到减去中位数后的正值。
                 if (normSquared <= 1e-12)
                 {
                     for (int column = 0; column < sampledIndexes.Count; column++)
@@ -938,7 +1003,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Reduces broad-band random noise before comparing material fingerprints.
+        /// 在比较材料指纹前降低宽带随机噪声。
         /// </summary>
         private static double[] SmoothMaterialProfile(double[] values, int windowSize)
         {
@@ -957,7 +1022,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Updates a material centroid and re-normalizes it to preserve cosine-similarity comparisons.
+        /// 更新材料质心并重新归一化，以保持余弦相似度比较有效。
         /// </summary>
         private static void AddProfileToGroup(MaterialGroup group, int row, double[] profile)
         {
@@ -974,7 +1039,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Calculates cosine similarity because every supplied profile is normalized to unit length.
+        /// 计算余弦相似度；输入轮廓均已归一化为单位长度。
         /// </summary>
         private static double DotProduct(double[] first, double[] second)
         {
@@ -985,7 +1050,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Uses one hue per detected material and adjusts brightness only for the selected mapping value.
+        /// 每种已识别材料使用一种色相，仅依据选定 Mapping 值调整亮度。
         /// </summary>
         private static Color GetMaterialShade(Color hue, double value)
         {
@@ -1001,7 +1066,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Validates scan spectra and confirms all points use the same Raman axis.
+        /// 验证扫描光谱，并确认所有点使用相同的拉曼坐标轴。
         /// </summary>
         private static void ValidateSpectra(IList<Spectrum> spectra, int minimumCount)
         {
@@ -1032,7 +1097,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Gets sample indexes between 100 and 3100 cm-1 for full-spectrum algorithms.
+        /// 获取 100～3100 cm⁻¹ 范围内供全谱算法使用的采样索引。
         /// </summary>
         private static List<int> GetFeatureIndexes(double[] shifts)
         {
@@ -1047,7 +1112,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Retains regularly-spaced samples so long mapping calculations remain responsive.
+        /// 等间距保留采样点，使较长的 Mapping 计算保持响应速度。
         /// </summary>
         private static List<int> SampleIndexes(IList<int> indexes, int stride)
         {
@@ -1058,7 +1123,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Centers every PCA feature column around its average.
+        /// 将每个 PCA 特征列中心化到其平均值。
         /// </summary>
         private static void CenterColumns(double[,] matrix, int rows, int columns)
         {
@@ -1074,7 +1139,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Uses power iteration to extract one principal-component loading vector.
+        /// 使用幂迭代提取一个主成分载荷向量。
         /// </summary>
         private static double[] ExtractComponent(double[,] matrix, int rows, int columns)
         {
@@ -1107,7 +1172,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Calculates a robust multi-component distance for every PCA row.
+        /// 为每个 PCA 数据行计算稳健的多分量距离。
         /// </summary>
         private static double[] CalculateRobustDistances(double[,] scores, int rows, int components)
         {
@@ -1131,7 +1196,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Fits a lower-envelope quadratic curve for slow baseline removal.
+        /// 拟合下包络二次曲线以去除缓慢变化的基线。
         /// </summary>
         private static double[] FitLowerEnvelopeQuadratic(double[] values)
         {
@@ -1155,7 +1220,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Solves the weighted quadratic least-squares normal equations.
+        /// 求解加权二次最小二乘正规方程。
         /// </summary>
         private static double[] FitWeightedQuadratic(double[] values, double[] weights)
         {
@@ -1187,7 +1252,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Solves a three-variable augmented matrix by Gaussian elimination.
+        /// 使用高斯消元求解三变量增广矩阵。
         /// </summary>
         private static double[] SolveThreeByThree(double[,] matrix)
         {
@@ -1224,7 +1289,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Linearly interpolates a threshold crossing between two neighboring samples.
+        /// 在两个相邻采样点之间线性插值阈值交点。
         /// </summary>
         private static double InterpolateCrossing(
             double x1, double y1, double x2, double y2, double target)
@@ -1237,7 +1302,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns a robust median without changing the caller's array/list.
+        /// 在不修改调用方数组或列表的情况下返回稳健中位数。
         /// </summary>
         private static double Median(IList<double> values)
         {
@@ -1254,7 +1319,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns an interpolated percentile without changing the caller's values.
+        /// 在不修改调用方数据的情况下返回插值百分位数。
         /// </summary>
         private static double Percentile(double[] values, double percentile)
         {
@@ -1274,7 +1339,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Returns the median absolute deviation around a supplied center.
+        /// 返回相对指定中心的绝对偏差中位数。
         /// </summary>
         private static double MedianAbsoluteDeviation(double[] values, double center)
         {
@@ -1285,7 +1350,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Checks whether a value can be used in a numerical measurement.
+        /// 检查数值是否可用于数值测量。
         /// </summary>
         private static bool IsFinite(double value)
         {
@@ -1293,7 +1358,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Converts an invalid instrument value to zero for local preprocessing.
+        /// 在局部预处理中将无效仪器数值转换为零。
         /// </summary>
         private static double SafeValue(double value)
         {
@@ -1301,7 +1366,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Creates the invalid marker used for a missing or noise-only local peak.
+        /// 创建用于缺失波峰或纯噪声局部波峰的无效标记。
         /// </summary>
         private static PeakMeasurement InvalidPeak()
         {
@@ -1315,7 +1380,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Limits a value to zero through one.
+        /// 将数值限制在零到一之间。
         /// </summary>
         private static double Clamp01(double value)
         {
@@ -1323,7 +1388,7 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// Limits a value to an explicit inclusive range.
+        /// 将数值限制在指定闭区间内。
         /// </summary>
         private static double Clamp(double minimum, double maximum, double value)
         {

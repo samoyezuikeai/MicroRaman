@@ -198,7 +198,7 @@ namespace MicroRaman
             }
             catch
             {
-                // A failed verification must never leave a temporary calibration available for scanning.
+                // 验证失败时绝不能留下可供扫描使用的临时标定结果。
                 ResetOrigin();
                 throw;
             }
@@ -372,7 +372,7 @@ namespace MicroRaman
                     long darkAcquisitionMilliseconds = 0;
                     if (refreshDarkSpectrum)
                     {
-                        // Force the dark acquisition to start with LD confirmed off and no prior bright frame queued.
+                        // 确认 LD 已关闭且队列中无旧亮帧后，才开始采集暗谱。
                         setLaserOutput(false);
                         progress.Report(string.Format("更新暗谱 {0}/{1}", index + 1, normalizedPoints.Count));
                         Stopwatch darkTimer = Stopwatch.StartNew();

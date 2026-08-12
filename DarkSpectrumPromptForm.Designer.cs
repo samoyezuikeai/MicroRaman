@@ -1,4 +1,4 @@
-namespace MicroRaman
+﻿namespace MicroRaman
 {
     partial class DarkSpectrumPromptForm
     {
@@ -28,9 +28,6 @@ namespace MicroRaman
             this.promptLabel = new System.Windows.Forms.Label();
             this.contentPanel.SuspendLayout();
             this.SuspendLayout();
-            // 
-            // contentPanel
-            // 
             this.contentPanel.Controls.Add(this.captureDarkSpectrumButton);
             this.contentPanel.Controls.Add(this.promptLabel);
             this.contentPanel.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -39,9 +36,6 @@ namespace MicroRaman
             this.contentPanel.Padding = new System.Windows.Forms.Padding(26, 25, 26, 26);
             this.contentPanel.Size = new System.Drawing.Size(578, 238);
             this.contentPanel.TabIndex = 0;
-            // 
-            // captureDarkSpectrumButton
-            // 
             this.captureDarkSpectrumButton.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.captureDarkSpectrumButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.captureDarkSpectrumButton.Location = new System.Drawing.Point(174, 134);
@@ -50,9 +44,6 @@ namespace MicroRaman
             this.captureDarkSpectrumButton.TabIndex = 1;
             this.captureDarkSpectrumButton.Text = "采集暗谱";
             this.captureDarkSpectrumButton.UseVisualStyleBackColor = true;
-            // 
-            // promptLabel
-            // 
             this.promptLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.promptLabel.Location = new System.Drawing.Point(26, 25);
             this.promptLabel.Name = "promptLabel";
@@ -60,9 +51,6 @@ namespace MicroRaman
             this.promptLabel.TabIndex = 0;
             this.promptLabel.Text = "请确认已关闭照明灯后，点击下方的“采集暗谱”按钮。\r\n采集完成后会自动打开 TEC 和激光器，再显示实时光谱。";
             this.promptLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // DarkSpectrumPromptForm
-            // 
             this.AcceptButton = this.captureDarkSpectrumButton;
             this.AutoScaleDimensions = new System.Drawing.SizeF(12F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -82,4 +70,3 @@ namespace MicroRaman
         }
     }
 }
-

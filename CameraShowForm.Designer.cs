@@ -57,9 +57,6 @@
             ((System.ComponentModel.ISupportInitialize)(this.yPointCountNumeric)).BeginInit();
             this.previewPanel.SuspendLayout();
             this.SuspendLayout();
-            // 
-            // controlPanel
-            // 
             this.controlPanel.BackColor = System.Drawing.Color.White;
             this.controlPanel.Controls.Add(this.resolutionLabel);
             this.controlPanel.Controls.Add(this.resolutionComboBox);
@@ -81,9 +78,6 @@
             this.controlPanel.Name = "controlPanel";
             this.controlPanel.Size = new System.Drawing.Size(1962, 92);
             this.controlPanel.TabIndex = 0;
-            // 
-            // resolutionLabel
-            // 
             this.resolutionLabel.AutoSize = true;
             this.resolutionLabel.ForeColor = System.Drawing.Color.Black;
             this.resolutionLabel.Location = new System.Drawing.Point(20, 32);
@@ -92,9 +86,6 @@
             this.resolutionLabel.Size = new System.Drawing.Size(82, 24);
             this.resolutionLabel.TabIndex = 0;
             this.resolutionLabel.Text = "分辨率";
-            // 
-            // resolutionComboBox
-            // 
             this.resolutionComboBox.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.resolutionComboBox.FormattingEnabled = true;
             this.resolutionComboBox.Items.AddRange(new object[] {
@@ -106,9 +97,6 @@
             this.resolutionComboBox.Name = "resolutionComboBox";
             this.resolutionComboBox.Size = new System.Drawing.Size(266, 32);
             this.resolutionComboBox.TabIndex = 1;
-            // 
-            // exposureLabel
-            // 
             this.exposureLabel.AutoSize = true;
             this.exposureLabel.ForeColor = System.Drawing.Color.Black;
             this.exposureLabel.Location = new System.Drawing.Point(410, 32);
@@ -117,9 +105,6 @@
             this.exposureLabel.Size = new System.Drawing.Size(106, 24);
             this.exposureLabel.TabIndex = 2;
             this.exposureLabel.Text = "曝光(ms)";
-            // 
-            // exposureNumeric
-            // 
             this.exposureNumeric.DecimalPlaces = 1;
             this.exposureNumeric.Increment = new decimal(new int[] {
             1,
@@ -146,9 +131,6 @@
             0,
             0,
             0});
-            // 
-            // gainLabel
-            // 
             this.gainLabel.AutoSize = true;
             this.gainLabel.ForeColor = System.Drawing.Color.Black;
             this.gainLabel.Location = new System.Drawing.Point(696, 32);
@@ -157,9 +139,6 @@
             this.gainLabel.Size = new System.Drawing.Size(58, 24);
             this.gainLabel.TabIndex = 4;
             this.gainLabel.Text = "增益";
-            // 
-            // gainNumeric
-            // 
             this.gainNumeric.Location = new System.Drawing.Point(764, 24);
             this.gainNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.gainNumeric.Maximum = new decimal(new int[] {
@@ -175,9 +154,6 @@
             0,
             0,
             0});
-            // 
-            // autoExposureCheckBox
-            // 
             this.autoExposureCheckBox.AutoSize = true;
             this.autoExposureCheckBox.Checked = true;
             this.autoExposureCheckBox.CheckState = System.Windows.Forms.CheckState.Checked;
@@ -190,9 +166,6 @@
             this.autoExposureCheckBox.Text = "自动曝光";
             this.autoExposureCheckBox.UseVisualStyleBackColor = true;
             this.autoExposureCheckBox.CheckedChanged += new System.EventHandler(this.AutoExposureCheckBox_CheckedChanged);
-            // 
-            // applySettingsButton
-            // 
             this.applySettingsButton.Location = new System.Drawing.Point(1054, 20);
             this.applySettingsButton.Margin = new System.Windows.Forms.Padding(6);
             this.applySettingsButton.Name = "applySettingsButton";
@@ -201,9 +174,6 @@
             this.applySettingsButton.Text = "应用参数";
             this.applySettingsButton.UseVisualStyleBackColor = true;
             this.applySettingsButton.Click += new System.EventHandler(this.ApplySettingsButton_Click);
-            // 
-            // rectangleToolButton
-            // 
             this.rectangleToolButton.BackColor = System.Drawing.Color.White;
             this.rectangleToolButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.rectangleToolButton.ForeColor = System.Drawing.Color.Black;
@@ -217,9 +187,6 @@
             this.rectangleToolButton.Text = "    框选";
             this.rectangleToolButton.UseVisualStyleBackColor = false;
             this.rectangleToolButton.Click += new System.EventHandler(this.RectangleToolButton_Click);
-            // 
-            // xPointCountLabel
-            // 
             this.xPointCountLabel.AutoSize = true;
             this.xPointCountLabel.ForeColor = System.Drawing.Color.Black;
             this.xPointCountLabel.Location = new System.Drawing.Point(1372, 32);
@@ -228,9 +195,6 @@
             this.xPointCountLabel.Size = new System.Drawing.Size(22, 24);
             this.xPointCountLabel.TabIndex = 9;
             this.xPointCountLabel.Text = "X";
-            // 
-            // xPointCountNumeric
-            // 
             this.xPointCountNumeric.Location = new System.Drawing.Point(1400, 24);
             this.xPointCountNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.xPointCountNumeric.Minimum = new decimal(new int[] {
@@ -247,9 +211,6 @@
             0,
             0});
             this.xPointCountNumeric.ValueChanged += new System.EventHandler(this.ScanPointCount_ValueChanged);
-            // 
-            // yPointCountLabel
-            // 
             this.yPointCountLabel.AutoSize = true;
             this.yPointCountLabel.ForeColor = System.Drawing.Color.Black;
             this.yPointCountLabel.Location = new System.Drawing.Point(1496, 32);
@@ -258,9 +219,6 @@
             this.yPointCountLabel.Size = new System.Drawing.Size(22, 24);
             this.yPointCountLabel.TabIndex = 11;
             this.yPointCountLabel.Text = "Y";
-            // 
-            // yPointCountNumeric
-            // 
             this.yPointCountNumeric.Location = new System.Drawing.Point(1524, 24);
             this.yPointCountNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.yPointCountNumeric.Minimum = new decimal(new int[] {
@@ -277,9 +235,6 @@
             0,
             0});
             this.yPointCountNumeric.ValueChanged += new System.EventHandler(this.ScanPointCount_ValueChanged);
-            // 
-            // performanceLabel
-            // 
             this.performanceLabel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.performanceLabel.ForeColor = System.Drawing.Color.Green;
             this.performanceLabel.Location = new System.Drawing.Point(1622, 20);
@@ -289,9 +244,6 @@
             this.performanceLabel.TabIndex = 13;
             this.performanceLabel.Text = "正在测量帧率…";
             this.performanceLabel.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            // 
-            // previewPanel
-            // 
             this.previewPanel.BackColor = System.Drawing.Color.Black;
             this.previewPanel.Controls.Add(this.stagePositionLabel);
             this.previewPanel.Controls.Add(this.statusLabel);
@@ -305,9 +257,6 @@
             this.previewPanel.MouseMove += new System.Windows.Forms.MouseEventHandler(this.PreviewPanel_MouseMove);
             this.previewPanel.MouseUp += new System.Windows.Forms.MouseEventHandler(this.PreviewPanel_MouseUp);
             this.previewPanel.Resize += new System.EventHandler(this.PreviewPanel_Resize);
-            // 
-            // stagePositionLabel
-            // 
             this.stagePositionLabel.BackColor = System.Drawing.Color.Black;
             this.stagePositionLabel.Dock = System.Windows.Forms.DockStyle.Right;
             this.stagePositionLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Bold);
@@ -318,9 +267,6 @@
             this.stagePositionLabel.Size = new System.Drawing.Size(264, 1024);
             this.stagePositionLabel.TabIndex = 2;
             this.stagePositionLabel.Text = "平台坐标\r\nX: ---- mm\r\nY: ---- mm\r\nZ: ---- mm";
-            // 
-            // statusLabel
-            // 
             this.statusLabel.BackColor = System.Drawing.Color.Transparent;
             this.statusLabel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.statusLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 12F);
@@ -332,9 +278,6 @@
             this.statusLabel.TabIndex = 0;
             this.statusLabel.Text = "正在连接相机…";
             this.statusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-            // 
-            // CameraShowForm
-            // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(12F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1962, 1116);

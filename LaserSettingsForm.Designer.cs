@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -113,9 +113,6 @@ namespace MicroRaman
             ((System.ComponentModel.ISupportInitialize)(this.pwmCorrectValue)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.currentValue)).BeginInit();
             this.SuspendLayout();
-            // 
-            // rootLayout
-            // 
             this.rootLayout.ColumnCount = 1;
             this.rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             this.rootLayout.Controls.Add(this.connectionLabel, 0, 0);
@@ -131,9 +128,6 @@ namespace MicroRaman
             this.rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180F));
             this.rootLayout.Size = new Size(1180, 720);
             this.rootLayout.TabIndex = 0;
-            // 
-            // connectionLabel
-            // 
             this.connectionLabel.Dock = DockStyle.Fill;
             this.connectionLabel.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
             this.connectionLabel.Location = new Point(15, 15);
@@ -142,9 +136,6 @@ namespace MicroRaman
             this.connectionLabel.TabIndex = 0;
             this.connectionLabel.Text = "激光器：未连接";
             this.connectionLabel.TextAlign = ContentAlignment.MiddleLeft;
-            // 
-            // settingsLayout
-            // 
             this.settingsLayout.ColumnCount = 2;
             this.settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
             this.settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
@@ -158,9 +149,6 @@ namespace MicroRaman
             this.settingsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             this.settingsLayout.Size = new Size(1150, 454);
             this.settingsLayout.TabIndex = 1;
-            // 
-            // switchAndTemperatureGroupBox
-            // 
             this.switchAndTemperatureGroupBox.Controls.Add(this.powerRangeLabel);
             this.switchAndTemperatureGroupBox.Controls.Add(this.temperatureSettingsLayout);
             this.switchAndTemperatureGroupBox.Controls.Add(this.switchButtonPanel);
@@ -172,9 +160,6 @@ namespace MicroRaman
             this.switchAndTemperatureGroupBox.TabIndex = 0;
             this.switchAndTemperatureGroupBox.TabStop = false;
             this.switchAndTemperatureGroupBox.Text = "开关与温控";
-            // 
-            // switchButtonPanel
-            // 
             this.switchButtonPanel.Controls.Add(this.allOnButton);
             this.switchButtonPanel.Controls.Add(this.allOffButton);
             this.switchButtonPanel.Controls.Add(this.ldToggleButton);
@@ -184,9 +169,6 @@ namespace MicroRaman
             this.switchButtonPanel.Name = "switchButtonPanel";
             this.switchButtonPanel.Size = new Size(453, 40);
             this.switchButtonPanel.TabIndex = 0;
-            // 
-            // allOnButton
-            // 
             this.allOnButton.Location = new Point(3, 3);
             this.allOnButton.Name = "allOnButton";
             this.allOnButton.Size = new Size(82, 30);
@@ -194,9 +176,6 @@ namespace MicroRaman
             this.allOnButton.Text = "全部开启";
             this.allOnButton.UseVisualStyleBackColor = true;
             this.allOnButton.Click += new EventHandler(this.AllOnButton_Click);
-            // 
-            // allOffButton
-            // 
             this.allOffButton.Location = new Point(91, 3);
             this.allOffButton.Name = "allOffButton";
             this.allOffButton.Size = new Size(82, 30);
@@ -204,9 +183,6 @@ namespace MicroRaman
             this.allOffButton.Text = "全部关闭";
             this.allOffButton.UseVisualStyleBackColor = true;
             this.allOffButton.Click += new EventHandler(this.AllOffButton_Click);
-            // 
-            // ldToggleButton
-            // 
             this.ldToggleButton.Location = new Point(179, 3);
             this.ldToggleButton.Name = "ldToggleButton";
             this.ldToggleButton.Size = new Size(82, 30);
@@ -214,9 +190,6 @@ namespace MicroRaman
             this.ldToggleButton.Text = "LD：关";
             this.ldToggleButton.UseVisualStyleBackColor = true;
             this.ldToggleButton.Click += new EventHandler(this.LdToggleButton_Click);
-            // 
-            // tecToggleButton
-            // 
             this.tecToggleButton.Location = new Point(267, 3);
             this.tecToggleButton.Name = "tecToggleButton";
             this.tecToggleButton.Size = new Size(82, 30);
@@ -224,9 +197,6 @@ namespace MicroRaman
             this.tecToggleButton.Text = "TEC：关";
             this.tecToggleButton.UseVisualStyleBackColor = true;
             this.tecToggleButton.Click += new EventHandler(this.TecToggleButton_Click);
-            // 
-            // temperatureSettingsLayout
-            // 
             this.temperatureSettingsLayout.ColumnCount = 4;
             this.temperatureSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             this.temperatureSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
@@ -251,55 +221,34 @@ namespace MicroRaman
             this.temperatureSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
             this.temperatureSettingsLayout.Size = new Size(430, 148);
             this.temperatureSettingsLayout.TabIndex = 1;
-            // 
-            // periodValue
-            // 
             this.periodValue.Anchor = AnchorStyles.Left;
             this.periodValue.Margin = new Padding(0, 6, 0, 0);
             this.periodValue.Size = new Size(130, 28);
             this.periodValue.Maximum = new decimal(new int[] { 10000, 0, 0, 0 });
             this.periodValue.Name = "periodValue";
             this.periodValue.Value = new decimal(new int[] { 500, 0, 0, 0 });
-            // 
-            // applyPeriodButton
-            // 
             this.applyPeriodButton.Dock = DockStyle.Fill;
             this.applyPeriodButton.Name = "applyPeriodButton";
             this.applyPeriodButton.Text = "应用";
             this.applyPeriodButton.UseVisualStyleBackColor = true;
             this.applyPeriodButton.Click += new EventHandler(this.ApplyPeriodButton_Click);
-            // 
-            // temperatureValue
-            // 
             this.temperatureValue.Anchor = AnchorStyles.Left;
             this.temperatureValue.Margin = new Padding(0, 6, 0, 0);
             this.temperatureValue.Size = new Size(130, 28);
             this.temperatureValue.Minimum = new decimal(new int[] { 20, 0, 0, -2147483648 });
             this.temperatureValue.Name = "temperatureValue";
             this.temperatureValue.Value = new decimal(new int[] { 25, 0, 0, 0 });
-            // 
-            // applyTemperatureButton
-            // 
             this.applyTemperatureButton.Dock = DockStyle.Fill;
             this.applyTemperatureButton.Name = "applyTemperatureButton";
             this.applyTemperatureButton.Text = "应用";
             this.applyTemperatureButton.UseVisualStyleBackColor = true;
             this.applyTemperatureButton.Click += new EventHandler(this.ApplyTemperatureButton_Click);
-            // 
-            // periodPresetPanel
-            // 
             this.periodPresetPanel.Name = "periodPresetPanel";
             this.periodPresetPanel.Dock = DockStyle.Fill;
             this.periodPresetPanel.TabIndex = 2;
-            // 
-            // temperaturePresetPanel
-            // 
             this.temperaturePresetPanel.Name = "temperaturePresetPanel";
             this.temperaturePresetPanel.Dock = DockStyle.Fill;
             this.temperaturePresetPanel.TabIndex = 3;
-            // 
-            // powerRangeLabel
-            // 
             this.powerRangeLabel.AutoSize = true;
             this.powerRangeLabel.ForeColor = Color.DimGray;
             this.powerRangeLabel.Location = new Point(20, 246);
@@ -307,9 +256,6 @@ namespace MicroRaman
             this.powerRangeLabel.Size = new Size(250, 20);
             this.powerRangeLabel.TabIndex = 2;
             this.powerRangeLabel.Text = "激光功率范围：等待设备信息";
-            // 
-            // powerAndCurrentGroupBox
-            // 
             this.powerAndCurrentGroupBox.Controls.Add(this.powerSettingsLayout);
             this.powerAndCurrentGroupBox.Dock = DockStyle.Fill;
             this.powerAndCurrentGroupBox.Location = new Point(486, 7);
@@ -319,9 +265,6 @@ namespace MicroRaman
             this.powerAndCurrentGroupBox.TabIndex = 1;
             this.powerAndCurrentGroupBox.TabStop = false;
             this.powerAndCurrentGroupBox.Text = "功率与电流";
-            // 
-            // powerSettingsLayout
-            // 
             this.powerSettingsLayout.ColumnCount = 4;
             this.powerSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             this.powerSettingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
@@ -358,12 +301,9 @@ namespace MicroRaman
             this.powerSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             this.powerSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
             this.powerSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
-            this.powerSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
-            this.powerSettingsLayout.Size = new Size(615, 334);
+            this.powerSettingsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 108F));
+            this.powerSettingsLayout.Size = new Size(615, 370);
             this.powerSettingsLayout.TabIndex = 0;
-            // 
-            // Numeric controls
-            // 
             this.powerValue.Anchor = AnchorStyles.Left;
             this.powerValue.Margin = new Padding(0, 7, 0, 0);
             this.powerValue.Size = new Size(190, 28);
@@ -387,10 +327,7 @@ namespace MicroRaman
             this.currentValue.Size = new Size(190, 28);
             this.currentValue.Maximum = new decimal(new int[] { 1200, 0, 0, 0 });
             this.currentValue.Name = "currentValue";
-            this.currentValue.Value = new decimal(new int[] { 800, 0, 0, 0 });
-            // 
-            // applyPowerButton
-            // 
+            this.currentValue.Value = new decimal(new int[] { 1000, 0, 0, 0 });
             this.applyPowerButton.Dock = DockStyle.Fill;
             this.applyPowerButton.Name = "applyPowerButton";
             this.applyPowerButton.Text = "设置功率";
@@ -411,34 +348,20 @@ namespace MicroRaman
             this.applyCurrentButton.Text = "设置电流";
             this.applyCurrentButton.UseVisualStyleBackColor = true;
             this.applyCurrentButton.Click += new EventHandler(this.ApplyCurrentButton_Click);
-            // 
-            // powerPresetPanel
-            // 
             this.powerPresetPanel.Name = "powerPresetPanel";
             this.powerPresetPanel.Dock = DockStyle.Fill;
             this.powerPresetPanel.TabIndex = 1;
-            // 
-            // pwmPresetPanel
-            // 
             this.pwmPresetPanel.Name = "pwmPresetPanel";
             this.pwmPresetPanel.Dock = DockStyle.Fill;
             this.pwmPresetPanel.TabIndex = 2;
-            // 
-            // pwmCorrectPresetPanel
-            // 
             this.pwmCorrectPresetPanel.Name = "pwmCorrectPresetPanel";
             this.pwmCorrectPresetPanel.Dock = DockStyle.Fill;
             this.pwmCorrectPresetPanel.TabIndex = 3;
-            // 
-            // currentPresetPanel
-            // 
-            this.currentPresetPanel.AutoScroll = true;
+            this.currentPresetPanel.AutoScroll = false;
+            this.currentPresetPanel.WrapContents = true;
             this.currentPresetPanel.Name = "currentPresetPanel";
             this.currentPresetPanel.Dock = DockStyle.Fill;
             this.currentPresetPanel.TabIndex = 4;
-            // 
-            // statusGroupBox
-            // 
             this.statusGroupBox.Controls.Add(this.statusLayout);
             this.statusGroupBox.Dock = DockStyle.Fill;
             this.statusGroupBox.Location = new Point(15, 521);
@@ -448,9 +371,6 @@ namespace MicroRaman
             this.statusGroupBox.TabIndex = 2;
             this.statusGroupBox.TabStop = false;
             this.statusGroupBox.Text = "激光器状态";
-            // 
-            // statusLayout
-            // 
             this.statusLayout.ColumnCount = 1;
             this.statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             this.statusLayout.Controls.Add(this.statusActionPanel, 0, 0);
@@ -463,26 +383,17 @@ namespace MicroRaman
             this.statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             this.statusLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
             this.statusLayout.TabIndex = 0;
-            // 
-            // statusActionPanel
-            // 
             this.statusActionPanel.Controls.Add(this.refreshStatusButton);
             this.statusActionPanel.Controls.Add(this.autoRefreshCheckBox);
             this.statusActionPanel.Dock = DockStyle.Fill;
             this.statusActionPanel.Name = "statusActionPanel";
             this.statusActionPanel.TabIndex = 0;
-            // 
-            // refreshStatusButton
-            // 
             this.refreshStatusButton.Name = "refreshStatusButton";
             this.refreshStatusButton.Size = new Size(90, 30);
             this.refreshStatusButton.TabIndex = 0;
             this.refreshStatusButton.Text = "刷新状态";
             this.refreshStatusButton.UseVisualStyleBackColor = true;
             this.refreshStatusButton.Click += new EventHandler(this.RefreshStatusButton_Click);
-            // 
-            // autoRefreshCheckBox
-            // 
             this.autoRefreshCheckBox.AutoSize = true;
             this.autoRefreshCheckBox.Location = new Point(105, 7);
             this.autoRefreshCheckBox.Name = "autoRefreshCheckBox";
@@ -490,9 +401,6 @@ namespace MicroRaman
             this.autoRefreshCheckBox.TabIndex = 1;
             this.autoRefreshCheckBox.Text = "自动刷新 (1秒)";
             this.autoRefreshCheckBox.UseVisualStyleBackColor = true;
-            // 
-            // statusValuesLayout
-            // 
             this.statusValuesLayout.ColumnCount = 9;
             this.statusValuesLayout.Dock = DockStyle.Fill;
             this.statusValuesLayout.RowCount = 2;
@@ -515,18 +423,12 @@ namespace MicroRaman
             }
             this.statusValuesLayout.Name = "statusValuesLayout";
             this.statusValuesLayout.TabIndex = 1;
-            // 
-            // rawStatusLabel
-            // 
             this.rawStatusLabel.Dock = DockStyle.Fill;
             this.rawStatusLabel.ForeColor = Color.DimGray;
             this.rawStatusLabel.Name = "rawStatusLabel";
             this.rawStatusLabel.TabIndex = 2;
             this.rawStatusLabel.Text = "原始状态：--";
             this.rawStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
-            // 
-            // LaserSettingsForm
-            // 
             this.AutoScaleMode = AutoScaleMode.Dpi;
             this.ClientSize = new Size(1180, 720);
             this.Controls.Add(this.rootLayout);
