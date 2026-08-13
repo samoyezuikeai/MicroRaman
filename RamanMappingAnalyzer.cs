@@ -779,6 +779,7 @@ namespace MicroRaman
             double cosine = 0.0;
             double sine = 0.0;
             double saturation = 0.0;
+            double colorValue = 0.0;
             double weight = 0.0;
             double remainingTransparency = 1.0;
             double fallbackHue = 0.0;
@@ -797,6 +798,7 @@ namespace MicroRaman
                 cosine += Math.Cos(radians) * opacity;
                 sine += Math.Sin(radians) * opacity;
                 saturation += channelSaturation * opacity;
+                colorValue += value * opacity;
                 weight += opacity;
                 remainingTransparency *= 1.0 - opacity;
             }
@@ -809,7 +811,23 @@ namespace MicroRaman
             if (hueDegrees < 0.0)
                 hueDegrees += 360.0;
             double finalOpacity = 1.0 - remainingTransparency;
-            return HsvToColor(hueDegrees, saturation / weight, finalOpacity);
+            Color mixedColor = HsvToColor(
+                hueDegrees,
+                saturation / weight,
+                colorValue / weight);
+            return BlendOverWhite(mixedColor, finalOpacity);
+        }
+
+        /// <summary>
+        /// 按指定不透明度将目标颜色叠加到白色背景；弱信号接近白色，强信号接近目标颜色。
+        /// </summary>
+        private static Color BlendOverWhite(Color color, double opacity)
+        {
+            opacity = Clamp01(opacity);
+            return Color.FromArgb(
+                (int)Math.Round(255.0 + (color.R - 255.0) * opacity),
+                (int)Math.Round(255.0 + (color.G - 255.0) * opacity),
+                (int)Math.Round(255.0 + (color.B - 255.0) * opacity));
         }
 
         private static void ColorToHsv(Color color, out double hue, out double saturation, out double value)
@@ -1055,14 +1073,7 @@ namespace MicroRaman
         private static Color GetMaterialShade(Color hue, double value)
         {
             double shade = Clamp01(value);
-            Color low = Color.FromArgb(
-                (int)Math.Round(hue.R * 0.65),
-                (int)Math.Round(hue.G * 0.65),
-                (int)Math.Round(hue.B * 0.65));
-            return Color.FromArgb(
-                (int)Math.Round(low.R + (hue.R - low.R) * shade),
-                (int)Math.Round(low.G + (hue.G - low.G) * shade),
-                (int)Math.Round(low.B + (hue.B - low.B) * shade));
+            return BlendOverWhite(hue, 0.10 + 0.90 * shade);
         }
 
         /// <summary>

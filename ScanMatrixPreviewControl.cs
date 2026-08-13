@@ -203,6 +203,10 @@ namespace MicroRaman
                 using (Brush brush = new SolidBrush(color))
                     graphics.FillRectangle(brush, cellBounds);
             }
+
+            // Mapping 后仍绘制完整外边框，使白色背景区域也能明确显示伪彩图范围。
+            using (Pen border = new Pen(Color.Black, 2f))
+                graphics.DrawRectangle(border, gridBounds);
         }
 
         /// <summary>
@@ -210,7 +214,7 @@ namespace MicroRaman
         /// </summary>
         private void DrawMappingGrid(Graphics graphics, Rectangle gridBounds)
         {
-            using (Pen grid = new Pen(Color.FromArgb(180, Color.ForestGreen), 1f))
+            using (Pen grid = new Pen(Color.Black, 1f))
             {
                 for (int column = 1; column < columnCount; column++)
                 {
@@ -226,7 +230,7 @@ namespace MicroRaman
                 }
             }
 
-            using (Pen border = new Pen(Color.ForestGreen, 2f))
+            using (Pen border = new Pen(Color.Black, 2f))
                 graphics.DrawRectangle(border, gridBounds);
         }
 

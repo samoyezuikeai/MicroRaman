@@ -78,12 +78,13 @@ namespace MicroRaman
         private readonly List<RamanPeakRange> peakRanges = new List<RamanPeakRange>();
         private readonly List<PeakColorChoice> peakColorChoices = new List<PeakColorChoice>
         {
-            new PeakColorChoice("蓝色", Color.FromArgb(30, 144, 255)),
-            new PeakColorChoice("青色", Color.FromArgb(0, 200, 220)),
-            new PeakColorChoice("绿色", Color.FromArgb(45, 180, 95)),
-            new PeakColorChoice("黄色", Color.FromArgb(255, 215, 0)),
-            new PeakColorChoice("橙色", Color.FromArgb(255, 128, 0)),
-            new PeakColorChoice("红色", Color.FromArgb(220, 45, 40))
+            new PeakColorChoice("红色", Color.FromArgb(235, 35, 35)),
+            new PeakColorChoice("橙色", Color.FromArgb(245, 130, 20)),
+            new PeakColorChoice("黄色", Color.FromArgb(235, 215, 20)),
+            new PeakColorChoice("绿色", Color.FromArgb(20, 210, 75)),
+            new PeakColorChoice("蓝色", Color.FromArgb(25, 100, 230)),
+            new PeakColorChoice("靛色", Color.FromArgb(75, 45, 165)),
+            new PeakColorChoice("紫色", Color.FromArgb(160, 65, 205))
         };
         private bool changingColors;
 
@@ -200,7 +201,7 @@ namespace MicroRaman
             Color nextColor;
             if (!TryGetFirstAvailableColor(out nextColor))
             {
-                MessageBox.Show(this, "每个波峰必须使用不同颜色，最多可设置 6 个波峰。",
+                MessageBox.Show(this, "每个波峰必须使用不同颜色，最多可设置 7 个波峰。",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
