@@ -36,6 +36,7 @@ namespace MicroRaman
             this.toolStrip1 = new System.Windows.Forms.ToolStrip();
             this.CameraShow = new System.Windows.Forms.ToolStripButton();
             this.CalibrateStage = new System.Windows.Forms.ToolStripButton();
+            this.CalculateFocusPositions = new System.Windows.Forms.ToolStripButton();
             this.RealtimeSpectrum = new System.Windows.Forms.ToolStripButton();
             this.ScanSelection = new System.Windows.Forms.ToolStripButton();
             this.RamanMapping = new System.Windows.Forms.ToolStripButton();
@@ -70,7 +71,9 @@ namespace MicroRaman
             this.brightFieldGroupBox.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.brightFieldPreviewPictureBox)).BeginInit();
             this.SuspendLayout();
+            // 
             // comboBoxController
+            // 
             this.comboBoxController.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.comboBoxController.FormattingEnabled = true;
             this.comboBoxController.Location = new System.Drawing.Point(176, 31);
@@ -78,7 +81,9 @@ namespace MicroRaman
             this.comboBoxController.Name = "comboBoxController";
             this.comboBoxController.Size = new System.Drawing.Size(178, 43);
             this.comboBoxController.TabIndex = 0;
+            // 
             // label1
+            // 
             this.label1.AutoSize = true;
             this.label1.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.label1.Location = new System.Drawing.Point(14, 34);
@@ -87,7 +92,9 @@ namespace MicroRaman
             this.label1.Size = new System.Drawing.Size(177, 35);
             this.label1.TabIndex = 1;
             this.label1.Text = "控制台串口：";
+            // 
             // RefreshMyComList
+            // 
             this.RefreshMyComList.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.RefreshMyComList.Location = new System.Drawing.Point(20, 181);
             this.RefreshMyComList.Margin = new System.Windows.Forms.Padding(6);
@@ -97,7 +104,9 @@ namespace MicroRaman
             this.RefreshMyComList.Text = "刷新";
             this.RefreshMyComList.UseVisualStyleBackColor = true;
             this.RefreshMyComList.Click += new System.EventHandler(this.RefreshMyComList_Click);
+            // 
             // ConnectCom
+            // 
             this.ConnectCom.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.ConnectCom.Location = new System.Drawing.Point(138, 181);
             this.ConnectCom.Margin = new System.Windows.Forms.Padding(6);
@@ -107,7 +116,9 @@ namespace MicroRaman
             this.ConnectCom.Text = "连接";
             this.ConnectCom.UseVisualStyleBackColor = true;
             this.ConnectCom.Click += new System.EventHandler(this.ConnectCom_Click);
+            // 
             // toolStrip1
+            // 
             this.toolStrip1.AutoSize = false;
             this.toolStrip1.BackColor = System.Drawing.Color.White;
             this.toolStrip1.GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden;
@@ -115,6 +126,7 @@ namespace MicroRaman
             this.toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.CameraShow,
             this.CalibrateStage,
+            this.CalculateFocusPositions,
             this.RealtimeSpectrum,
             this.ScanSelection,
             this.RamanMapping});
@@ -124,7 +136,9 @@ namespace MicroRaman
             this.toolStrip1.Size = new System.Drawing.Size(2228, 80);
             this.toolStrip1.TabIndex = 4;
             this.toolStrip1.Text = "toolStrip1";
+            // 
             // CameraShow
+            // 
             this.CameraShow.AutoSize = false;
             this.CameraShow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.CameraShow.Image = ((System.Drawing.Image)(resources.GetObject("CameraShow.Image")));
@@ -134,7 +148,9 @@ namespace MicroRaman
             this.CameraShow.Size = new System.Drawing.Size(56, 56);
             this.CameraShow.ToolTipText = "点击后打开显微镜摄像头";
             this.CameraShow.Click += new System.EventHandler(this.CameraShow_Click);
+            // 
             // CalibrateStage
+            // 
             this.CalibrateStage.AutoSize = false;
             this.CalibrateStage.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.CalibrateStage.Image = ((System.Drawing.Image)(resources.GetObject("CalibrateStage.Image")));
@@ -143,7 +159,22 @@ namespace MicroRaman
             this.CalibrateStage.Size = new System.Drawing.Size(56, 56);
             this.CalibrateStage.ToolTipText = "在关闭激光、打开明场照明后计算像素与平台坐标比例定标校准";
             this.CalibrateStage.Click += new System.EventHandler(this.CalibrateStage_Click);
+            // 
+            // CalculateFocusPositions
+            // 
+            this.CalculateFocusPositions.AutoSize = false;
+            this.CalculateFocusPositions.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
+            this.CalculateFocusPositions.Enabled = false;
+            this.CalculateFocusPositions.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+            this.CalculateFocusPositions.Image = ((System.Drawing.Image)(resources.GetObject("CalculateFocusPositions.Image")));
+            this.CalculateFocusPositions.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.CalculateFocusPositions.Name = "CalculateFocusPositions";
+            this.CalculateFocusPositions.Size = new System.Drawing.Size(56, 56);
+            this.CalculateFocusPositions.ToolTipText = "定标并框选后，按蛇形路径计算并保存每个点的绝对 XYZ 焦点位置";
+            this.CalculateFocusPositions.Click += new System.EventHandler(this.CalculateFocusPositions_Click);
+            // 
             // RealtimeSpectrum
+            // 
             this.RealtimeSpectrum.AutoSize = false;
             this.RealtimeSpectrum.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.RealtimeSpectrum.Enabled = false;
@@ -153,9 +184,11 @@ namespace MicroRaman
             this.RealtimeSpectrum.Name = "RealtimeSpectrum";
             this.RealtimeSpectrum.Size = new System.Drawing.Size(56, 56);
             this.RealtimeSpectrum.Text = "实时光谱";
-            this.RealtimeSpectrum.ToolTipText = "开始或停止实时读取光谱仪；停止时清空波形图";
+            this.RealtimeSpectrum.ToolTipText = "用于扫描前检测激光器和光谱仪，开始或停止实时读取光谱仪；停止时清空波形图";
             this.RealtimeSpectrum.Click += new System.EventHandler(this.RealtimeSpectrum_Click);
+            // 
             // ScanSelection
+            // 
             this.ScanSelection.AutoSize = false;
             this.ScanSelection.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.ScanSelection.Image = ((System.Drawing.Image)(resources.GetObject("ScanSelection.Image")));
@@ -165,7 +198,9 @@ namespace MicroRaman
             this.ScanSelection.Size = new System.Drawing.Size(56, 56);
             this.ScanSelection.ToolTipText = "按蛇形顺序遍历框选区域内的全部网格点";
             this.ScanSelection.Click += new System.EventHandler(this.ScanSelection_Click);
+            // 
             // RamanMapping
+            // 
             this.RamanMapping.AutoSize = false;
             this.RamanMapping.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
             this.RamanMapping.Enabled = false;
@@ -177,7 +212,9 @@ namespace MicroRaman
             this.RamanMapping.Text = "拉曼 Mapping";
             this.RamanMapping.ToolTipText = "扫描全部完成后，根据各点保存的整条光谱生成伪彩图";
             this.RamanMapping.Click += new System.EventHandler(this.RamanMapping_Click);
+            // 
             // panel1
+            // 
             this.panel1.BackColor = System.Drawing.Color.White;
             this.panel1.Controls.Add(this.mappingReferenceGroupBox);
             this.panel1.Controls.Add(this.integrationRangeLabel);
@@ -197,7 +234,9 @@ namespace MicroRaman
             this.panel1.Name = "panel1";
             this.panel1.Size = new System.Drawing.Size(402, 1270);
             this.panel1.TabIndex = 5;
+            // 
             // mappingReferenceGroupBox
+            // 
             this.mappingReferenceGroupBox.Controls.Add(this.SetMappingSign);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingPcaRadioButton);
             this.mappingReferenceGroupBox.Controls.Add(this.mappingFullSpectrumRadioButton);
@@ -212,7 +251,9 @@ namespace MicroRaman
             this.mappingReferenceGroupBox.TabIndex = 12;
             this.mappingReferenceGroupBox.TabStop = false;
             this.mappingReferenceGroupBox.Text = "Mapping 参考指标";
+            // 
             // SetMappingSign
+            // 
             this.SetMappingSign.Location = new System.Drawing.Point(18, 342);
             this.SetMappingSign.Name = "SetMappingSign";
             this.SetMappingSign.Size = new System.Drawing.Size(304, 56);
@@ -220,7 +261,9 @@ namespace MicroRaman
             this.SetMappingSign.Text = "设置 Mapping 指标";
             this.SetMappingSign.UseVisualStyleBackColor = true;
             this.SetMappingSign.Click += new System.EventHandler(this.SetMappingSign_Click);
+            // 
             // mappingPcaRadioButton
+            // 
             this.mappingPcaRadioButton.AutoSize = true;
             this.mappingPcaRadioButton.Location = new System.Drawing.Point(18, 232);
             this.mappingPcaRadioButton.Name = "mappingPcaRadioButton";
@@ -228,7 +271,9 @@ namespace MicroRaman
             this.mappingPcaRadioButton.TabIndex = 6;
             this.mappingPcaRadioButton.Text = "PCA 全谱异常";
             this.mappingPcaRadioButton.UseVisualStyleBackColor = true;
+            // 
             // mappingFullSpectrumRadioButton
+            // 
             this.mappingFullSpectrumRadioButton.AutoSize = true;
             this.mappingFullSpectrumRadioButton.Location = new System.Drawing.Point(18, 184);
             this.mappingFullSpectrumRadioButton.Name = "mappingFullSpectrumRadioButton";
@@ -236,30 +281,38 @@ namespace MicroRaman
             this.mappingFullSpectrumRadioButton.TabIndex = 5;
             this.mappingFullSpectrumRadioButton.Text = "全谱差异（荧光）";
             this.mappingFullSpectrumRadioButton.UseVisualStyleBackColor = true;
+            // 
             // mappingReferenceHintLabel
+            // 
             this.mappingReferenceHintLabel.ForeColor = System.Drawing.Color.DimGray;
             this.mappingReferenceHintLabel.Location = new System.Drawing.Point(18, 280);
             this.mappingReferenceHintLabel.Name = "mappingReferenceHintLabel";
             this.mappingReferenceHintLabel.Size = new System.Drawing.Size(322, 43);
             this.mappingReferenceHintLabel.TabIndex = 7;
             this.mappingReferenceHintLabel.Text = "请按实验目的手动选择指标\r\n";
+            // 
             // mappingPeakWidthRadioButton
+            // 
             this.mappingPeakWidthRadioButton.AutoSize = true;
-            this.mappingPeakWidthRadioButton.Location = new System.Drawing.Point(18, 136);
+            this.mappingPeakWidthRadioButton.Location = new System.Drawing.Point(18, 88);
             this.mappingPeakWidthRadioButton.Name = "mappingPeakWidthRadioButton";
             this.mappingPeakWidthRadioButton.Size = new System.Drawing.Size(203, 35);
-            this.mappingPeakWidthRadioButton.TabIndex = 4;
+            this.mappingPeakWidthRadioButton.TabIndex = 3;
             this.mappingPeakWidthRadioButton.Text = "半高宽 FWHM";
             this.mappingPeakWidthRadioButton.UseVisualStyleBackColor = true;
+            // 
             // mappingPeakPositionRadioButton
+            // 
             this.mappingPeakPositionRadioButton.AutoSize = true;
-            this.mappingPeakPositionRadioButton.Location = new System.Drawing.Point(18, 88);
+            this.mappingPeakPositionRadioButton.Location = new System.Drawing.Point(18, 136);
             this.mappingPeakPositionRadioButton.Name = "mappingPeakPositionRadioButton";
             this.mappingPeakPositionRadioButton.Size = new System.Drawing.Size(117, 35);
-            this.mappingPeakPositionRadioButton.TabIndex = 3;
+            this.mappingPeakPositionRadioButton.TabIndex = 4;
             this.mappingPeakPositionRadioButton.Text = "峰位置";
             this.mappingPeakPositionRadioButton.UseVisualStyleBackColor = true;
+            // 
             // mappingPeakHeightRadioButton
+            // 
             this.mappingPeakHeightRadioButton.AutoSize = true;
             this.mappingPeakHeightRadioButton.Checked = true;
             this.mappingPeakHeightRadioButton.Location = new System.Drawing.Point(18, 40);
@@ -269,7 +322,9 @@ namespace MicroRaman
             this.mappingPeakHeightRadioButton.TabStop = true;
             this.mappingPeakHeightRadioButton.Text = "峰高峰面积";
             this.mappingPeakHeightRadioButton.UseVisualStyleBackColor = true;
+            // 
             // integrationRangeLabel
+            // 
             this.integrationRangeLabel.AutoSize = true;
             this.integrationRangeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 8.5F);
             this.integrationRangeLabel.ForeColor = System.Drawing.Color.DimGray;
@@ -279,7 +334,9 @@ namespace MicroRaman
             this.integrationRangeLabel.Size = new System.Drawing.Size(266, 30);
             this.integrationRangeLabel.TabIndex = 11;
             this.integrationRangeLabel.Text = "可设置范围：连接后读取";
+            // 
             // ApplySpectrometerParameters
+            // 
             this.ApplySpectrometerParameters.Enabled = false;
             this.ApplySpectrometerParameters.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.ApplySpectrometerParameters.Location = new System.Drawing.Point(25, 416);
@@ -290,7 +347,9 @@ namespace MicroRaman
             this.ApplySpectrometerParameters.Text = "应用参数";
             this.ApplySpectrometerParameters.UseVisualStyleBackColor = true;
             this.ApplySpectrometerParameters.Click += new System.EventHandler(this.ApplySpectrometerParameters_Click);
+            // 
             // spectrometerIntegrationTimeTextBox
+            // 
             this.spectrometerIntegrationTimeTextBox.Enabled = false;
             this.spectrometerIntegrationTimeTextBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.spectrometerIntegrationTimeTextBox.Location = new System.Drawing.Point(227, 333);
@@ -299,7 +358,9 @@ namespace MicroRaman
             this.spectrometerIntegrationTimeTextBox.Size = new System.Drawing.Size(138, 41);
             this.spectrometerIntegrationTimeTextBox.TabIndex = 9;
             this.spectrometerIntegrationTimeTextBox.Text = "1000";
+            // 
             // integrationTimeLabel
+            // 
             this.integrationTimeLabel.AutoSize = true;
             this.integrationTimeLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.integrationTimeLabel.Location = new System.Drawing.Point(19, 337);
@@ -308,7 +369,9 @@ namespace MicroRaman
             this.integrationTimeLabel.Size = new System.Drawing.Size(214, 35);
             this.integrationTimeLabel.TabIndex = 8;
             this.integrationTimeLabel.Text = "积分时间 (ms)：";
+            // 
             // LaserSettings
+            // 
             this.LaserSettings.Enabled = false;
             this.LaserSettings.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.LaserSettings.Location = new System.Drawing.Point(20, 251);
@@ -319,7 +382,9 @@ namespace MicroRaman
             this.LaserSettings.Text = "激光器设置";
             this.LaserSettings.UseVisualStyleBackColor = true;
             this.LaserSettings.Click += new System.EventHandler(this.LaserSettings_Click);
+            // 
             // labelSpectrometer
+            // 
             this.labelSpectrometer.AutoSize = true;
             this.labelSpectrometer.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.labelSpectrometer.Location = new System.Drawing.Point(14, 129);
@@ -328,7 +393,9 @@ namespace MicroRaman
             this.labelSpectrometer.Size = new System.Drawing.Size(204, 35);
             this.labelSpectrometer.TabIndex = 7;
             this.labelSpectrometer.Text = "光谱仪：未连接";
+            // 
             // label2
+            // 
             this.label2.AutoSize = true;
             this.label2.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
             this.label2.Location = new System.Drawing.Point(14, 91);
@@ -337,7 +404,9 @@ namespace MicroRaman
             this.label2.Size = new System.Drawing.Size(204, 35);
             this.label2.TabIndex = 5;
             this.label2.Text = "激光器：未连接";
+            // 
             // formsPlot1
+            // 
             this.formsPlot1.Dock = System.Windows.Forms.DockStyle.Top;
             this.formsPlot1.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
             this.formsPlot1.Location = new System.Drawing.Point(402, 80);
@@ -345,7 +414,9 @@ namespace MicroRaman
             this.formsPlot1.Name = "formsPlot1";
             this.formsPlot1.Size = new System.Drawing.Size(1826, 700);
             this.formsPlot1.TabIndex = 6;
+            // 
             // scanWorkspace
+            // 
             this.scanWorkspace.ColumnCount = 2;
             this.scanWorkspace.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.scanWorkspace.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
@@ -359,7 +430,9 @@ namespace MicroRaman
             this.scanWorkspace.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.scanWorkspace.Size = new System.Drawing.Size(1826, 570);
             this.scanWorkspace.TabIndex = 7;
+            // 
             // scanMatrixGroupBox
+            // 
             this.scanMatrixGroupBox.Controls.Add(this.scanMatrixPreviewControl);
             this.scanMatrixGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.scanMatrixGroupBox.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
@@ -369,14 +442,18 @@ namespace MicroRaman
             this.scanMatrixGroupBox.TabIndex = 0;
             this.scanMatrixGroupBox.TabStop = false;
             this.scanMatrixGroupBox.Text = "扫描坐标矩阵";
+            // 
             // scanMatrixPreviewControl
+            // 
             this.scanMatrixPreviewControl.BackColor = System.Drawing.Color.White;
             this.scanMatrixPreviewControl.Dock = System.Windows.Forms.DockStyle.Fill;
             this.scanMatrixPreviewControl.Location = new System.Drawing.Point(3, 34);
             this.scanMatrixPreviewControl.Name = "scanMatrixPreviewControl";
             this.scanMatrixPreviewControl.Size = new System.Drawing.Size(889, 503);
             this.scanMatrixPreviewControl.TabIndex = 0;
+            // 
             // brightFieldGroupBox
+            // 
             this.brightFieldGroupBox.Controls.Add(this.brightFieldPreviewStatusLabel);
             this.brightFieldGroupBox.Controls.Add(this.brightFieldPreviewPictureBox);
             this.brightFieldGroupBox.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -387,7 +464,9 @@ namespace MicroRaman
             this.brightFieldGroupBox.TabIndex = 1;
             this.brightFieldGroupBox.TabStop = false;
             this.brightFieldGroupBox.Text = "明场参考图";
+            // 
             // brightFieldPreviewStatusLabel
+            // 
             this.brightFieldPreviewStatusLabel.BackColor = System.Drawing.Color.Transparent;
             this.brightFieldPreviewStatusLabel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldPreviewStatusLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 12F);
@@ -398,7 +477,9 @@ namespace MicroRaman
             this.brightFieldPreviewStatusLabel.TabIndex = 1;
             this.brightFieldPreviewStatusLabel.Text = "等待检测开始";
             this.brightFieldPreviewStatusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
             // brightFieldPreviewPictureBox
+            // 
             this.brightFieldPreviewPictureBox.BackColor = System.Drawing.Color.Black;
             this.brightFieldPreviewPictureBox.Dock = System.Windows.Forms.DockStyle.Fill;
             this.brightFieldPreviewPictureBox.Location = new System.Drawing.Point(3, 34);
@@ -407,7 +488,9 @@ namespace MicroRaman
             this.brightFieldPreviewPictureBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.brightFieldPreviewPictureBox.TabIndex = 0;
             this.brightFieldPreviewPictureBox.TabStop = false;
+            // 
             // MainForm
+            // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(12F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(2228, 1350);
@@ -441,6 +524,7 @@ namespace MicroRaman
         private System.Windows.Forms.ToolStrip toolStrip1;
         private System.Windows.Forms.ToolStripButton CameraShow;
         private System.Windows.Forms.ToolStripButton CalibrateStage;
+        private System.Windows.Forms.ToolStripButton CalculateFocusPositions;
         private System.Windows.Forms.ToolStripButton RealtimeSpectrum;
         private System.Windows.Forms.ToolStripButton ScanSelection;
         private System.Windows.Forms.ToolStripButton RamanMapping;

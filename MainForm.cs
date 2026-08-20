@@ -20,6 +20,7 @@ namespace MicroRaman
         private LaserSettingsForm laserSettingsForm;
         private CancellationTokenSource scanCancellation;
         private CancellationTokenSource calibrationCancellation;
+        private CancellationTokenSource focusMapCancellation;
         private CancellationTokenSource realtimeSpectrumCancellation;
         private Task realtimeSpectrumTask;
         private bool realtimeSpectrumStarting;
@@ -58,6 +59,7 @@ namespace MicroRaman
         private int completedScanPointCount;
         private int spectrumDataVersion;
         private bool mappingCalculationRunning;
+        private bool cameraSelectionAvailable;
         private readonly object darkSpectrumSync = new object();
         // 手动保存的背景只用于实时光谱；蛇形扫描在每一行开始时刷新暗谱以跟踪温漂。
         private double[] savedDarkSpectrum;
@@ -116,6 +118,7 @@ namespace MicroRaman
             RefreshComList();
             UpdateRealtimeSpectrumButtonState();
             UpdateRamanMappingButtonState();
+            UpdatePlatformCommandButtonState();
         }
 
         /// <summary>
@@ -1043,6 +1046,7 @@ namespace MicroRaman
             RamanMapping.Enabled = !mappingCalculationRunning
                 && scanCancellation == null
                 && calibrationCancellation == null
+                && focusMapCancellation == null
                 && completedScanPointCount >= 2
                 && savedSpectrumCount == completedScanPointCount;
         }
@@ -1363,7 +1367,7 @@ namespace MicroRaman
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (scanCancellation != null || calibrationCancellation != null)
+            if (scanCancellation != null || calibrationCancellation != null || focusMapCancellation != null)
                 return;
 
             await StartRealtimeSpectrumSessionAsync(true, true);
@@ -1590,15 +1594,21 @@ namespace MicroRaman
             if (realtimeSpectrumStarting || realtimeSpectrumCancellation != null)
             {
                 CalibrateStage.Enabled = false;
+                CalculateFocusPositions.Enabled = false;
                 ScanSelection.Enabled = false;
                 return;
             }
 
-            if (scanCancellation == null && calibrationCancellation == null)
-            {
-                CalibrateStage.Enabled = true;
-                ScanSelection.Enabled = true;
-            }
+            bool idle = scanCancellation == null
+                && calibrationCancellation == null
+                && focusMapCancellation == null;
+            CalibrateStage.Enabled = idle;
+            CalculateFocusPositions.Enabled = idle
+                && cameraSelectionAvailable
+                && stageScanController.HasCalibration;
+            ScanSelection.Enabled = idle
+                && cameraSelectionAvailable
+                && stageScanController.HasCalibration;
         }
 
         /// <summary>
@@ -1619,7 +1629,8 @@ namespace MicroRaman
             RealtimeSpectrum.ToolTipText = "开始实时读取当前光谱仪的光谱";
             RealtimeSpectrum.Enabled = spectrometerDevice != null
                 && scanCancellation == null
-                && calibrationCancellation == null;
+                && calibrationCancellation == null
+                && focusMapCancellation == null;
         }
 
         /// <summary>
@@ -2006,6 +2017,7 @@ namespace MicroRaman
             {
                 cameraShowForm = new CameraShowForm();
                 cameraShowForm.SelectionPreviewUpdated += CameraSelectionPreviewUpdated;
+                cameraShowForm.SelectionStateChanged += CameraSelectionStateChanged;
                 cameraShowForm.FormClosed += CameraShowForm_FormClosed;
                 // 相机窗口不设为从属窗口，使各顶层窗口都能在点击时自然置前。
                 cameraShowForm.Show();
@@ -2028,9 +2040,31 @@ namespace MicroRaman
         {
             CameraShowForm closedCamera = sender as CameraShowForm;
             if (closedCamera != null)
+            {
                 closedCamera.SelectionPreviewUpdated -= CameraSelectionPreviewUpdated;
+                closedCamera.SelectionStateChanged -= CameraSelectionStateChanged;
+            }
             cameraShowForm = null;
+            cameraSelectionAvailable = false;
             stageScanController.ResetOrigin();
+            UpdatePlatformCommandButtonState();
+        }
+
+        private void CameraSelectionStateChanged(bool hasSelection)
+        {
+            if (IsDisposed || Disposing)
+                return;
+            if (InvokeRequired)
+            {
+                try { BeginInvoke(new Action<bool>(CameraSelectionStateChanged), hasSelection); }
+                catch (InvalidOperationException) { }
+                return;
+            }
+
+            cameraSelectionAvailable = hasSelection;
+            stageScanController.ClearFocusMap();
+            ClearSavedScanSpectra(false);
+            UpdatePlatformCommandButtonState();
         }
 
         /// <summary>
@@ -2038,7 +2072,7 @@ namespace MicroRaman
         /// </summary>
         private async void CalibrateStage_Click(object sender, EventArgs e)
         {
-            if (calibrationCancellation != null || scanCancellation != null
+            if (calibrationCancellation != null || focusMapCancellation != null || scanCancellation != null
                 || realtimeSpectrumStarting || realtimeSpectrumCancellation != null)
                 return;
             if (cameraShowForm == null || cameraShowForm.IsDisposed)
@@ -2072,9 +2106,11 @@ namespace MicroRaman
 
             calibrationCancellation = new CancellationTokenSource();
             CancellationToken token = calibrationCancellation.Token;
+            stageScanController.ClearFocusMap();
             cameraShowForm.HideSelectionOverlayForCalibration();
             CalibrateStage.Enabled = false;
-                ScanSelection.Enabled = false;
+            CalculateFocusPositions.Enabled = false;
+            ScanSelection.Enabled = false;
             SetLaserControlsEnabled(false);
             UpdateRealtimeSpectrumButtonState();
             UpdateRamanMappingButtonState();
@@ -2111,11 +2147,144 @@ namespace MicroRaman
                 calibrationCancellation.Dispose();
                 calibrationCancellation = null;
                 CalibrateStage.Text = "平台定标";
-                CalibrateStage.Enabled = true;
-                ScanSelection.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
                 UpdateRealtimeSpectrumButtonState();
                 UpdateRamanMappingButtonState();
+                UpdatePlatformCommandButtonState();
+            }
+        }
+
+        private async void CalculateFocusPositions_Click(object sender, EventArgs e)
+        {
+            if (focusMapCancellation != null)
+            {
+                focusMapCancellation.Cancel();
+                CalculateFocusPositions.Text = "停止中…";
+                return;
+            }
+            if (calibrationCancellation != null || scanCancellation != null
+                || realtimeSpectrumStarting || realtimeSpectrumCancellation != null)
+                return;
+            if (cameraShowForm == null || cameraShowForm.IsDisposed || !cameraSelectionAvailable)
+            {
+                MessageBox.Show(this, "请先在相机画面中完成框选。", "计算焦点位置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (!SerialPortManager.IsOpen || !stageScanController.HasCalibration)
+            {
+                MessageBox.Show(this, "请先连接 TANGO，并完成平台定标。", "计算焦点位置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (laserEnabled)
+            {
+                MessageBox.Show(this, "计算焦点需要明场纹理，请先关闭激光并打开明场照明。", "计算焦点位置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            List<PointF> scanPoints;
+            string errorMessage;
+            float selectionPixelAspectRatio;
+            if (!cameraShowForm.TryGetSnakeScanPoints(
+                out scanPoints, out errorMessage, out selectionPixelAspectRatio))
+            {
+                MessageBox.Show(this, errorMessage, "计算焦点位置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            double maximumNegativeTravel;
+            double maximumPositiveTravel;
+            try
+            {
+                FocusSearchSetup focusSearchSetup = stageScanController.GetFocusSearchSetup();
+                using (FocusRangeForm focusRangeForm = new FocusRangeForm(focusSearchSetup))
+                {
+                    if (focusRangeForm.ShowDialog(this) != DialogResult.OK)
+                        return;
+                    maximumNegativeTravel = focusRangeForm.MaximumNegativeTravel;
+                    maximumPositiveTravel = focusRangeForm.MaximumPositiveTravel;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "读取 Z 轴单位失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            focusMapCancellation = new CancellationTokenSource();
+            CancellationToken token = focusMapCancellation.Token;
+            bool restoreAutomaticExposure = false;
+            cameraShowForm.HideSelectionOverlayForCalibration();
+            cameraShowForm.SetFocusMapControlsEnabled(false);
+            try
+            {
+                restoreAutomaticExposure = cameraShowForm.FreezeAutomaticExposureForFocusMap();
+            }
+            catch (Exception ex)
+            {
+                cameraShowForm.SetFocusMapControlsEnabled(true);
+                cameraShowForm.RestoreSelectionOverlayAfterCalibration();
+                focusMapCancellation.Dispose();
+                focusMapCancellation = null;
+                MessageBox.Show(this, ex.Message, "锁定相机曝光失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdatePlatformCommandButtonState();
+                return;
+            }
+            CalculateFocusPositions.Text = "计算中…";
+            CalibrateStage.Enabled = false;
+            ScanSelection.Enabled = false;
+            SetLaserControlsEnabled(false);
+            UpdateRealtimeSpectrumButtonState();
+            UpdateRamanMappingButtonState();
+            IProgress<string> progress = new Progress<string>(text => CalculateFocusPositions.Text = text);
+            try
+            {
+                await Task.Run(
+                    () => stageScanController.CalculateFocusPositions(
+                        cameraShowForm,
+                        scanPoints,
+                        maximumNegativeTravel,
+                        maximumPositiveTravel,
+                        progress,
+                        token),
+                    token);
+                MessageBox.Show(this,
+                    "焦点位置计算完成。",
+                    "计算焦点位置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                stageScanController.ClearFocusMap();
+                MessageBox.Show(this, "焦点位置计算已停止，未保存不完整的焦点表。", "计算焦点位置",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                stageScanController.ClearFocusMap();
+                MessageBox.Show(this, ex.Message, "计算焦点位置失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (cameraShowForm != null && !cameraShowForm.IsDisposed)
+                {
+                    cameraShowForm.RestoreAutomaticExposureAfterFocusMap(restoreAutomaticExposure);
+                    cameraShowForm.SetFocusMapControlsEnabled(true);
+                    cameraShowForm.RestoreSelectionOverlayAfterCalibration();
+                }
+                focusMapCancellation.Dispose();
+                focusMapCancellation = null;
+                CalculateFocusPositions.Text = "计算焦点位置";
+                SetLaserControlsEnabled(laserDevice != null);
+                UpdateRealtimeSpectrumButtonState();
+                UpdateRamanMappingButtonState();
+                UpdatePlatformCommandButtonState();
             }
         }
 
@@ -2124,7 +2293,8 @@ namespace MicroRaman
         /// </summary>
         private async void ScanSelection_Click(object sender, EventArgs e)
         {
-            if (realtimeSpectrumStarting || realtimeSpectrumCancellation != null)
+            if (focusMapCancellation != null
+                || realtimeSpectrumStarting || realtimeSpectrumCancellation != null)
                 return;
 
             if (scanCancellation != null)
@@ -2197,6 +2367,7 @@ namespace MicroRaman
             CancellationToken token = scanCancellation.Token;
             ScanSelection.Text = "扫描中…";
             CalibrateStage.Enabled = false;
+            CalculateFocusPositions.Enabled = false;
             SetLaserControlsEnabled(false);
             UpdateRealtimeSpectrumButtonState();
             UpdateRamanMappingButtonState();
@@ -2239,10 +2410,10 @@ namespace MicroRaman
                 scanCancellation = null;
                 scanStartedUtc = DateTime.MinValue;
                 ScanSelection.Text = "蛇形扫描";
-                CalibrateStage.Enabled = true;
                 SetLaserControlsEnabled(laserDevice != null);
                 UpdateRealtimeSpectrumButtonState();
                 UpdateRamanMappingButtonState();
+                UpdatePlatformCommandButtonState();
             }
         }
 
@@ -2255,6 +2426,8 @@ namespace MicroRaman
                 scanCancellation.Cancel();
             if (calibrationCancellation != null)
                 calibrationCancellation.Cancel();
+            if (focusMapCancellation != null)
+                focusMapCancellation.Cancel();
             if (realtimeSpectrumCancellation != null)
                 realtimeSpectrumCancellation.Cancel();
             Image preview = brightFieldPreviewPictureBox.Image;

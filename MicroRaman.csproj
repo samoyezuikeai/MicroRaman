@@ -153,6 +153,12 @@
     <Compile Include="DarkSpectrumPromptForm.Designer.cs">
       <DependentUpon>DarkSpectrumPromptForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="FocusRangeForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FocusRangeForm.Designer.cs">
+      <DependentUpon>FocusRangeForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="RamanMappingAnalyzer.cs" />
     <Compile Include="RamanMappingOptionsForm.cs" />
     <Compile Include="StageScanController.cs" />

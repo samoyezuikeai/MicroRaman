@@ -52,8 +52,8 @@ namespace MicroRaman
             internal NumericUpDown StartInput;
             internal NumericUpDown EndInput;
             internal ComboBox MetricInput;
-            internal ComboBox ColorInput;
-            internal Panel ColorPreview;
+            internal Button ColorButton;
+            internal PeakColorChoice SelectedColor;
             internal Label Separator;
             internal Button DeleteButton;
         }
@@ -81,12 +81,13 @@ namespace MicroRaman
             new PeakColorChoice("红色", Color.FromArgb(235, 35, 35)),
             new PeakColorChoice("橙色", Color.FromArgb(245, 130, 20)),
             new PeakColorChoice("黄色", Color.FromArgb(235, 215, 20)),
+            new PeakColorChoice("黄绿色", Color.FromArgb(145, 205, 35)),
             new PeakColorChoice("绿色", Color.FromArgb(20, 210, 75)),
+            new PeakColorChoice("青色", Color.FromArgb(20, 185, 205)),
             new PeakColorChoice("蓝色", Color.FromArgb(25, 100, 230)),
             new PeakColorChoice("靛色", Color.FromArgb(75, 45, 165)),
             new PeakColorChoice("紫色", Color.FromArgb(160, 65, 205))
         };
-        private bool changingColors;
 
         internal bool Accepted { get; private set; }
 
@@ -198,14 +199,20 @@ namespace MicroRaman
         {
             double start = rows.Count > 0 ? (double)rows[rows.Count - 1].StartInput.Value : 500.0;
             double end = rows.Count > 0 ? (double)rows[rows.Count - 1].EndInput.Value : 540.0;
+            if (mappingMode == RamanMappingMode.PeakPosition
+                || mappingMode == RamanMappingMode.PeakWidth)
+                end = start;
             Color nextColor;
             if (!TryGetFirstAvailableColor(out nextColor))
             {
-                MessageBox.Show(this, "每个波峰必须使用不同颜色，最多可设置 7 个波峰。",
+                MessageBox.Show(this, "每个波峰必须使用不同颜色，最多可设置 9 个波峰。",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            RamanPeakMetric nextMetric = rows.Count > 0
+            RamanPeakMetric nextMetric = (mappingMode == RamanMappingMode.PeakPosition
+                || mappingMode == RamanMappingMode.PeakWidth)
+                ? RamanPeakMetric.Height
+                : rows.Count > 0
                 && rows[rows.Count - 1].MetricInput.SelectedIndex == 1
                     ? RamanPeakMetric.Area
                     : RamanPeakMetric.Height;
@@ -218,6 +225,12 @@ namespace MicroRaman
             Color suggestedColor,
             RamanPeakMetric suggestedMetric)
         {
+            // 峰位置和半高宽与峰高一样只接收一个目标位置；即使从峰面积模式
+            // 切换过来，也不能沿用之前隐藏的范围输入和面积计算方式。
+            if (mappingMode == RamanMappingMode.PeakPosition
+                || mappingMode == RamanMappingMode.PeakWidth)
+                suggestedMetric = RamanPeakMetric.Height;
+
             PeakRangeRow row = new PeakRangeRow
             {
                 NameLabel = new Label
@@ -257,21 +270,18 @@ namespace MicroRaman
                     Location = new Point(490, 0),
                     Size = new Size(92, 30)
                 },
-                ColorInput = new ComboBox
+                ColorButton = new Button
                 {
-                    DropDownStyle = ComboBoxStyle.DropDownList,
                     Location = new Point(590, 0),
-                    Size = new Size(92, 30)
-                },
-                ColorPreview = new Panel
-                {
-                    BorderStyle = BorderStyle.FixedSingle,
-                    Location = new Point(690, 0),
-                    Size = new Size(32, 24)
+                    Size = new Size(30, 30),
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand,
+                    AccessibleName = "选择颜色",
+                    UseVisualStyleBackColor = false
                 },
                 DeleteButton = new Button
                 {
-                    Location = new Point(730, 0),
+                    Location = new Point(630, 0),
                     Size = new Size(54, 30),
                     Text = "删除"
                 }
@@ -286,18 +296,16 @@ namespace MicroRaman
             row.MetricInput.Items.AddRange(new object[] { "峰高", "峰面积" });
             row.MetricInput.Visible = mappingMode == RamanMappingMode.PeakHeight
                 || mappingMode == RamanMappingMode.PeakArea;
-            for (int index = 0; index < peakColorChoices.Count; index++)
-                row.ColorInput.Items.Add(peakColorChoices[index]);
             SelectColor(row, suggestedColor);
             row.MetricInput.SelectedIndex = suggestedMetric == RamanPeakMetric.Area ? 1 : 0;
             UpdateMetricLayout(row, false);
             row.MetricInput.SelectedIndexChanged += MetricInput_SelectedIndexChanged;
-            row.ColorInput.SelectedIndexChanged += ColorInput_SelectedIndexChanged;
+            row.ColorButton.Click += ColorButton_Click;
             row.DeleteButton.Click += DeleteButton_Click;
             rowsPanel.Controls.AddRange(new Control[]
             {
                 row.NameLabel, row.StartInput, row.Separator, row.EndInput,
-                row.MetricInput, row.ColorInput, row.ColorPreview, row.DeleteButton
+                row.MetricInput, row.ColorButton, row.DeleteButton
             });
             LayoutRows();
         }
@@ -312,7 +320,7 @@ namespace MicroRaman
             foreach (Control control in new Control[]
             {
                 row.NameLabel, row.StartInput, row.Separator, row.EndInput,
-                row.MetricInput, row.ColorInput, row.ColorPreview, row.DeleteButton
+                row.MetricInput, row.ColorButton, row.DeleteButton
             })
             {
                 rowsPanel.Controls.Remove(control);
@@ -335,9 +343,8 @@ namespace MicroRaman
                 row.Separator.Location = new Point(278, top + 7);
                 row.EndInput.Location = new Point(330, top);
                 row.MetricInput.Location = new Point(490, top);
-                row.ColorInput.Location = new Point(590, top);
-                row.ColorPreview.Location = new Point(690, top + 3);
-                row.DeleteButton.Location = new Point(730, top);
+                row.ColorButton.Location = new Point(590, top);
+                row.DeleteButton.Location = new Point(630, top);
                 row.DeleteButton.Enabled = rows.Count > 1;
             }
             rowsPanel.AutoScrollMinSize = new Size(0, 12 + rows.Count * 46 + 4);
@@ -351,7 +358,10 @@ namespace MicroRaman
                 for (int index = 0; index < rows.Count; index++)
                 {
                     double start = (double)rows[index].StartInput.Value;
-                    RamanPeakMetric metric = rows[index].MetricInput.SelectedIndex == 1
+                    RamanPeakMetric metric = (mappingMode == RamanMappingMode.PeakPosition
+                        || mappingMode == RamanMappingMode.PeakWidth)
+                        ? RamanPeakMetric.Height
+                        : rows[index].MetricInput.SelectedIndex == 1
                         ? RamanPeakMetric.Area
                         : RamanPeakMetric.Height;
                     double end = metric == RamanPeakMetric.Area
@@ -371,7 +381,7 @@ namespace MicroRaman
                             Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
-                    PeakColorChoice choice = rows[index].ColorInput.SelectedItem as PeakColorChoice;
+                    PeakColorChoice choice = rows[index].SelectedColor;
                     if (choice == null)
                     {
                         MessageBox.Show(this, "请为波峰" + (index + 1) + "选择颜色。",
@@ -380,7 +390,7 @@ namespace MicroRaman
                     }
                     for (int previous = 0; previous < index; previous++)
                     {
-                        PeakColorChoice previousChoice = rows[previous].ColorInput.SelectedItem as PeakColorChoice;
+                        PeakColorChoice previousChoice = rows[previous].SelectedColor;
                         if (previousChoice != null && previousChoice.Color.ToArgb() == choice.Color.ToArgb())
                         {
                             MessageBox.Show(this, "每个波峰必须选择不同颜色。",
@@ -434,41 +444,114 @@ namespace MicroRaman
             return Math.Max(minimum, Math.Min(maximum, converted));
         }
 
-        private void ColorInput_SelectedIndexChanged(object sender, EventArgs e)
+        private void ColorButton_Click(object sender, EventArgs e)
         {
-            if (changingColors)
+            PeakRangeRow row = rows.Find(item => item.ColorButton == sender);
+            if (row == null)
                 return;
+            ShowColorPalette(row);
+        }
 
-            PeakRangeRow changedRow = rows.Find(row => row.ColorInput == sender);
-            if (changedRow == null)
-                return;
-            PeakColorChoice changedChoice = changedRow.ColorInput.SelectedItem as PeakColorChoice;
-            if (changedChoice == null)
-                return;
-
-            foreach (PeakRangeRow row in rows)
+        private void ShowColorPalette(PeakRangeRow row)
+        {
+            const int cellSize = 44;
+            var palette = new TableLayoutPanel
             {
-                if (row == changedRow)
-                    continue;
-                PeakColorChoice otherChoice = row.ColorInput.SelectedItem as PeakColorChoice;
-                if (otherChoice == null || otherChoice.Color.ToArgb() != changedChoice.Color.ToArgb())
-                    continue;
-
-                Color replacement;
-                if (TryGetFirstAvailableColor(out replacement, changedRow))
-                {
-                    changingColors = true;
-                    SelectColor(changedRow, replacement);
-                    changingColors = false;
-                }
-                else
-                {
-                    MessageBox.Show(this, "每个波峰必须选择不同颜色。", Text,
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-                return;
+                BackColor = Color.White,
+                ColumnCount = 3,
+                RowCount = 3,
+                Padding = new Padding(6),
+                Margin = Padding.Empty,
+                Size = new Size(cellSize * 3 + 12, cellSize * 3 + 12)
+            };
+            for (int index = 0; index < 3; index++)
+            {
+                palette.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, cellSize));
+                palette.RowStyles.Add(new RowStyle(SizeType.Absolute, cellSize));
             }
-            UpdateColorPreview(changedRow);
+
+            var dropDown = new ToolStripDropDown
+            {
+                AutoClose = true,
+                Padding = Padding.Empty,
+                DropShadowEnabled = true
+            };
+            for (int index = 0; index < peakColorChoices.Count; index++)
+            {
+                PeakColorChoice choice = peakColorChoices[index];
+                bool selected = row.SelectedColor != null
+                    && row.SelectedColor.Color.ToArgb() == choice.Color.ToArgb();
+                var colorButton = new Button
+                {
+                    BackColor = choice.Color,
+                    Dock = DockStyle.Fill,
+                    Margin = new Padding(3),
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand,
+                    AccessibleName = choice.Name,
+                    UseVisualStyleBackColor = false
+                };
+                colorButton.FlatAppearance.BorderColor = selected
+                    ? Color.FromArgb(35, 35, 35)
+                    : Color.FromArgb(220, 220, 220);
+                colorButton.FlatAppearance.BorderSize = selected ? 3 : 1;
+                colorButton.FlatAppearance.MouseOverBackColor = choice.Color;
+                colorButton.Click += delegate
+                {
+                    ApplyColorChoice(row, choice);
+                };
+                palette.Controls.Add(colorButton, index % 3, index / 3);
+            }
+
+            var host = new ToolStripControlHost(palette)
+            {
+                AutoSize = false,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                Size = palette.Size
+            };
+            dropDown.Items.Add(host);
+            dropDown.Closed += delegate
+            {
+                // Closed 事件触发时 WinForms 仍在执行 ToolStripDropDown 的内部关闭流程，
+                // 不能在这里同步 Dispose；投递到下一轮 UI 消息后再安全释放。
+                if (IsDisposed || !IsHandleCreated)
+                    return;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (!dropDown.IsDisposed)
+                            dropDown.Dispose();
+                    });
+                }
+                catch (InvalidOperationException)
+                {
+                    // 设置窗口正在关闭时，控件树会统一释放色盘。
+                }
+            };
+            dropDown.Show(row.ColorButton, new Point(0, row.ColorButton.Height));
+        }
+
+        private void ApplyColorChoice(PeakRangeRow row, PeakColorChoice choice)
+        {
+            if (row.SelectedColor == choice)
+                return;
+
+            PeakRangeRow conflictingRow = rows.Find(item =>
+                item != row
+                && item.SelectedColor != null
+                && item.SelectedColor.Color.ToArgb() == choice.Color.ToArgb());
+            PeakColorChoice previousChoice = row.SelectedColor;
+            row.SelectedColor = choice;
+            UpdateColorButton(row);
+
+            // 颜色必须保持唯一；点击已使用颜色时与对应波峰交换，保证所点即所得。
+            if (conflictingRow != null)
+            {
+                conflictingRow.SelectedColor = previousChoice;
+                UpdateColorButton(conflictingRow);
+            }
         }
 
         private bool TryGetFirstAvailableColor(out Color color, PeakRangeRow ignoredRow = null)
@@ -481,7 +564,7 @@ namespace MicroRaman
                 {
                     if (row == ignoredRow)
                         continue;
-                    PeakColorChoice choice = row.ColorInput.SelectedItem as PeakColorChoice;
+                    PeakColorChoice choice = row.SelectedColor;
                     if (choice != null && choice.Color.ToArgb() == candidate.ToArgb())
                     {
                         used = true;
@@ -504,19 +587,22 @@ namespace MicroRaman
             {
                 if (peakColorChoices[index].Color.ToArgb() == color.ToArgb())
                 {
-                    row.ColorInput.SelectedIndex = index;
-                    UpdateColorPreview(row);
+                    row.SelectedColor = peakColorChoices[index];
+                    UpdateColorButton(row);
                     return;
                 }
             }
-            row.ColorInput.SelectedIndex = 0;
-            UpdateColorPreview(row);
+            row.SelectedColor = peakColorChoices[0];
+            UpdateColorButton(row);
         }
 
-        private static void UpdateColorPreview(PeakRangeRow row)
+        private static void UpdateColorButton(PeakRangeRow row)
         {
-            PeakColorChoice choice = row.ColorInput.SelectedItem as PeakColorChoice;
-            row.ColorPreview.BackColor = choice == null ? Color.Black : choice.Color;
+            PeakColorChoice choice = row.SelectedColor;
+            row.ColorButton.BackColor = choice == null ? Color.Black : choice.Color;
+            row.ColorButton.AccessibleDescription = choice == null ? "未选择" : choice.Name;
+            row.ColorButton.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 70);
+            row.ColorButton.FlatAppearance.BorderSize = 1;
         }
     }
 }

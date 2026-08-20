@@ -16,6 +16,7 @@ namespace MicroRaman
         // 所有 Mapping 光谱在分析前换算到 1000 ms 等效曝光；固定下限可防止全弱峰图被拉伸成亮色。
         private const double MidPeakStrength = 1000.0;
         private const double MinimumAreaStrengthPerRamanShift = 250.0;
+        private const double MinimumFwhmReference = 1.0;
         private const double StableColorLevelCount = 32.0;
         private const double AutomaticPeakSearchHalfWidth = 40.0;
         private const double AutomaticPeakBoundaryHalfWidth = 100.0;
@@ -198,7 +199,8 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// 将每个配置波峰映射到独立颜色通道；信号强度控制通道亮度，同一格子的多个波峰按色相混合。
+        /// 将每个配置波峰映射到独立颜色通道；所选峰指标控制通道亮度，
+        /// 同一格子的多个波峰按色相混合。
         /// </summary>
         internal static PeakMappingResult AnalyzePeaks(
             IList<Spectrum> spectra,
@@ -222,7 +224,10 @@ namespace MicroRaman
                 List<double> detectedStrengths = new List<double>();
                 for (int row = 0; row < spectra.Count; row++)
                 {
-                    PeakMeasurement measurement = definition.Metric == RamanPeakMetric.Height
+                    bool locatePeakAroundTarget = mappingMode == RamanMappingMode.PeakWidth
+                        || mappingMode == RamanMappingMode.PeakPosition
+                        || definition.Metric == RamanPeakMetric.Height;
+                    PeakMeasurement measurement = locatePeakAroundTarget
                         ? MeasurePeakAtPosition(
                             spectra[row].RamanShifts,
                             spectra[row].Intensities,
@@ -724,9 +729,11 @@ namespace MicroRaman
 
         private static double GetPeakStrength(PeakMeasurement measurement, RamanMappingMode mode)
         {
-            return mode == RamanMappingMode.PeakArea
-                ? measurement.Area
-                : measurement.Height;
+            if (mode == RamanMappingMode.PeakArea)
+                return measurement.Area;
+            if (mode == RamanMappingMode.PeakWidth)
+                return measurement.Width;
+            return measurement.Height;
         }
 
         private static RamanMappingMode GetPeakMode(
@@ -752,10 +759,21 @@ namespace MicroRaman
             PeakDefinition definition,
             RamanMappingMode mode)
         {
-            double fixedFloor = mode == RamanMappingMode.PeakArea
-                ? MinimumAreaStrengthPerRamanShift
-                    * Math.Max(1.0, definition.RangeEnd - definition.RangeStart)
-                : MidPeakStrength;
+            double fixedFloor;
+            if (mode == RamanMappingMode.PeakArea)
+            {
+                fixedFloor = MinimumAreaStrengthPerRamanShift
+                    * Math.Max(1.0, definition.RangeEnd - definition.RangeStart);
+            }
+            else if (mode == RamanMappingMode.PeakWidth)
+            {
+                // FWHM 的单位是 cm⁻¹，不能复用峰高的计数强度基准。
+                fixedFloor = MinimumFwhmReference;
+            }
+            else
+            {
+                fixedFloor = MidPeakStrength;
+            }
             if (detectedStrengths == null || detectedStrengths.Count == 0)
                 return fixedFloor;
 

@@ -71,6 +71,24 @@ namespace MicroRaman
         }
 
         /// <summary>
+        /// 只发送指令，不等待自动状态回复。适用于随后通过状态查询等待完成的移动指令。
+        /// </summary>
+        public static void SendWithoutResponse(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                throw new ArgumentException("TANGO 指令不能为空。", nameof(command));
+
+            lock (serialSync)
+            {
+                if (!serialPort.IsOpen)
+                    throw new InvalidOperationException("TANGO 控制器串口尚未连接。");
+
+                serialPort.DiscardInBuffer();
+                serialPort.WriteLine(command);
+            }
+        }
+
+        /// <summary>
         /// 发送一条指令并在指定超时时间内读取响应；仅适合可安全重复发送的查询指令使用重试。
         /// </summary>
         /// <param name="command">发送给 TANGO 控制器的指令。</param>

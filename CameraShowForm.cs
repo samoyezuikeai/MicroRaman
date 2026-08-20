@@ -19,6 +19,7 @@ namespace MicroRaman
         private Thread captureThread;
         private System.Windows.Forms.Timer performanceTimer;
         private readonly Command stagePositionCommand = new Command();
+        private bool formClosing;
         private int stagePositionQueryPending;
         private readonly Stopwatch frameRateWatch = new Stopwatch();
         private readonly object frameArrivalSync = new object();
@@ -70,6 +71,7 @@ namespace MicroRaman
         private int savedSelectionFrameRequestId;
 
         internal event Action<Bitmap> SelectionPreviewUpdated;
+        internal event Action<bool> SelectionStateChanged;
 
         internal int CameraImageWidth { get { return imageWidth; } }
         internal int CameraImageHeight { get { return imageHeight; } }
@@ -85,7 +87,6 @@ namespace MicroRaman
             Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
             StartPosition = FormStartPosition.CenterScreen;
-            resolutionComboBox.SelectedIndex = 1;
             AutoExposureCheckBox_CheckedChanged(null, EventArgs.Empty);
         }
 
@@ -183,15 +184,10 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// 将分辨率、曝光方式、曝光时间和增益写入相机。
+        /// 将曝光方式、曝光时间和增益写入相机。
         /// </summary>
         private void ApplyFocusSettings()
         {
-            int resolution = Math.Max(0, resolutionComboBox.SelectedIndex);
-            EnsureSuccess(
-                TUCamNative.TUCAM_Capa_SetValue(camera.CameraHandle, TUCamNative.ResolutionCapability, resolution),
-                "设置预览分辨率");
-
             if (autoExposureCheckBox.Checked)
             {
                 // 与官方配套软件一致：由 SDK 根据当前显微镜照明持续调整亮度。
@@ -302,11 +298,15 @@ namespace MicroRaman
 
                 TucamDraw draw = CreateDrawRectangle(framePointer, frame.Width, frame.Height);
                 result = TUCamNative.TUCAM_Draw_Frame(camera.CameraHandle, ref draw);
-                RectangleSelectionOverlay overlay = selectionOverlay;
-                if (result == TucamResult.Success && overlay != null && previewHandle != IntPtr.Zero)
+                if (result == TucamResult.Success && previewHandle != IntPtr.Zero)
                 {
                     using (Graphics graphics = Graphics.FromHwnd(previewHandle))
-                        overlay.Draw(graphics, new Size(previewWidth, previewHeight));
+                    {
+                        RectangleSelectionOverlay overlay = selectionOverlay;
+                        if (overlay != null)
+                            overlay.Draw(graphics, new Size(previewWidth, previewHeight));
+                        DrawCenterCross(graphics, new Size(previewWidth, previewHeight));
+                    }
                 }
             }
             if (result == TucamResult.Success)
@@ -345,6 +345,28 @@ namespace MicroRaman
             RectangleSelectionOverlay overlay = selectionOverlay;
             if (overlay != null)
                 overlay.Draw(graphics, clientSize);
+            DrawCenterCross(graphics, clientSize);
+        }
+
+        /// <summary>
+        /// 在相机画面中心绘制始终可见的小十字，辅助判断光轴和画面中心。
+        /// </summary>
+        private static void DrawCenterCross(Graphics graphics, Size clientSize)
+        {
+            if (clientSize.Width <= 0 || clientSize.Height <= 0)
+                return;
+
+            const float armLength = 5f;
+            float centerX = clientSize.Width / 2f;
+            float centerY = clientSize.Height / 2f;
+            using (Pen shadow = new Pen(Color.Black, 2f))
+            using (Pen cross = new Pen(Color.Lime, 1f))
+            {
+                graphics.DrawLine(shadow, centerX - armLength, centerY, centerX + armLength, centerY);
+                graphics.DrawLine(shadow, centerX, centerY - armLength, centerX, centerY + armLength);
+                graphics.DrawLine(cross, centerX - armLength, centerY, centerX + armLength, centerY);
+                graphics.DrawLine(cross, centerX, centerY - armLength, centerX, centerY + armLength);
+            }
         }
 
         /// <summary>
@@ -492,23 +514,140 @@ namespace MicroRaman
             bool manual = !autoExposureCheckBox.Checked;
             exposureNumeric.Enabled = manual;
             gainNumeric.Enabled = manual;
+            ApplyCameraParametersImmediately();
         }
 
         /// <summary>
-        /// 重新启动采集以应用当前相机参数。
+        /// 曝光或增益改变时立即同步到已经打开的相机。
         /// </summary>
-        private void ApplySettingsButton_Click(object sender, EventArgs e)
+        private void CameraParameter_ValueChanged(object sender, EventArgs e)
         {
-            applySettingsButton.Enabled = false;
+            if (!autoExposureCheckBox.Checked)
+                ApplyCameraParametersImmediately();
+        }
+
+        private void ApplyCameraParametersImmediately()
+        {
+            if (camera.CameraHandle == IntPtr.Zero)
+                return;
+
             try
             {
-                StopCamera();
-                StartCamera();
+                if (autoExposureCheckBox.Checked)
+                {
+                    EnsureSuccess(
+                        TUCamNative.TUCAM_Capa_SetValue(
+                            camera.CameraHandle,
+                            TUCamNative.AutoExposureCapability,
+                            1),
+                        "开启自动曝光");
+                    return;
+                }
+
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Capa_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.AutoExposureCapability,
+                        0),
+                    "关闭自动曝光");
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Prop_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.ExposureTimeProperty,
+                        (double)exposureNumeric.Value,
+                        0),
+                    "设置曝光时间");
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Prop_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.GlobalGainProperty,
+                        (double)gainNumeric.Value,
+                        0),
+                    "设置全局增益");
             }
-            finally
+            catch (Exception ex)
             {
-                applySettingsButton.Enabled = true;
+                ShowCameraError(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 逐点计算焦点位置期间冻结自动曝光，使不同 Z 位置的清晰度分数可以直接比较。
+        /// 返回 true 表示聚焦结束后需要恢复自动曝光。
+        /// </summary>
+        internal bool FreezeAutomaticExposureForFocusMap()
+        {
+            if (!autoExposureCheckBox.Checked || camera.CameraHandle == IntPtr.Zero)
+                return false;
+
+            UpdateAutomaticExposureValues();
+            bool automaticExposureDisabled = false;
+            try
+            {
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Capa_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.AutoExposureCapability,
+                        0),
+                    "冻结焦点位置计算曝光");
+                automaticExposureDisabled = true;
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Prop_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.ExposureTimeProperty,
+                        (double)exposureNumeric.Value,
+                        0),
+                    "锁定焦点位置计算曝光时间");
+                EnsureSuccess(
+                    TUCamNative.TUCAM_Prop_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.GlobalGainProperty,
+                        (double)gainNumeric.Value,
+                        0),
+                    "锁定焦点位置计算增益");
+                return true;
+            }
+            catch
+            {
+                if (automaticExposureDisabled)
+                    TUCamNative.TUCAM_Capa_SetValue(
+                        camera.CameraHandle,
+                        TUCamNative.AutoExposureCapability,
+                        1);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 恢复用户在聚焦前选择的持续自动曝光状态。
+        /// </summary>
+        internal void RestoreAutomaticExposureAfterFocusMap(bool restore)
+        {
+            if (!restore || camera.CameraHandle == IntPtr.Zero)
+                return;
+
+            TucamResult result = TUCamNative.TUCAM_Capa_SetValue(
+                camera.CameraHandle,
+                TUCamNative.AutoExposureCapability,
+                1);
+            if (result != TucamResult.Success && !formClosing)
+                ShowCameraError("焦点位置计算结束后恢复自动曝光失败。");
+        }
+
+        /// <summary>
+        /// 焦点位置计算期间禁止改变曝光、框选和网格点数。
+        /// </summary>
+        internal void SetFocusMapControlsEnabled(bool enabled)
+        {
+            RunOnUiThread(() =>
+            {
+                autoExposureCheckBox.Enabled = enabled;
+                exposureNumeric.Enabled = enabled && !autoExposureCheckBox.Checked;
+                gainNumeric.Enabled = enabled && !autoExposureCheckBox.Checked;
+                rectangleToolButton.Enabled = enabled;
+                xPointCountNumeric.Enabled = enabled;
+                yPointCountNumeric.Enabled = enabled;
+            });
         }
 
         /// <summary>
@@ -577,7 +716,10 @@ namespace MicroRaman
         {
             UpdateOverlayGridSize();
             if (!selectionImageRegion.IsEmpty && capturing && !scanPreviewFrozen)
+            {
+                NotifySelectionStateChanged(true);
                 RequestSelectionPreview();
+            }
         }
 
         /// <summary>
@@ -608,6 +750,7 @@ namespace MicroRaman
             recordedScanPointsImage.Clear();
             selectionImageRegion = RectangleF.Empty;
             displayedSelectionImageRegion = RectangleF.Empty;
+            NotifySelectionStateChanged(false);
             if (selectionOverlay != null)
             {
                 selectionOverlay.ClearSelection();
@@ -661,11 +804,13 @@ namespace MicroRaman
                 UpdateSelectionOverlayFromImageCoordinates();
                 RequestSelectionPreview();
                 ExitRectangleTool();
+                NotifySelectionStateChanged(true);
             }
             else
             {
                 selectionImageRegion = RectangleF.Empty;
                 displayedSelectionImageRegion = RectangleF.Empty;
+                NotifySelectionStateChanged(false);
                 if (selectionOverlay != null)
                     selectionOverlay.ClearSelection();
             }
@@ -683,8 +828,19 @@ namespace MicroRaman
             previewPanel.Capture = false;
             selectionImageRegion = RectangleF.Empty;
             displayedSelectionImageRegion = RectangleF.Empty;
+            NotifySelectionStateChanged(false);
             if (selectionOverlay != null)
                 selectionOverlay.ClearSelection();
+        }
+
+        /// <summary>
+        /// 通知主窗口框选或网格参数已改变，使旧焦点位置表立即失效。
+        /// </summary>
+        private void NotifySelectionStateChanged(bool hasSelection)
+        {
+            Action<bool> handler = SelectionStateChanged;
+            if (handler != null)
+                handler(hasSelection);
         }
 
         /// <summary>
@@ -1581,6 +1737,7 @@ namespace MicroRaman
         /// </summary>
         private void CameraShowForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            formClosing = true;
             CancelRectangleDrawing();
             Image selectionToolIcon = rectangleToolButton.Image;
             rectangleToolButton.Image = null;

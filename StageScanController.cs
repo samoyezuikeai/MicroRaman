@@ -7,7 +7,7 @@ using System.Threading;
 namespace MicroRaman
 {
     /// <summary>
-    /// 表示平台三轴坐标；当前扫描只改变 X、Y，Z 始终保持原值。
+    /// 表示平台三轴绝对坐标。
     /// </summary>
     internal struct StagePosition
     {
@@ -27,6 +27,20 @@ namespace MicroRaman
         internal double InitialAverageErrorPixels;
         internal double InitialMaximumErrorPixels;
         internal bool CalibrationRefined;
+    }
+
+    internal struct StageAxisLimits
+    {
+        internal double Lower;
+        internal double Upper;
+    }
+
+    internal struct FocusSearchSetup
+    {
+        internal int ZDimension;
+        internal string ZUnitDescription;
+        internal double DefaultNegativeDistance;
+        internal double DefaultPositiveDistance;
     }
 
     /// <summary>
@@ -85,6 +99,9 @@ namespace MicroRaman
         private int savedImageWidth;
         private int savedImageHeight;
         private double? savedCalibrationZ;
+        private List<FocusedScanPoint> savedFocusPoints;
+        private int savedFocusZDimension;
+        private StageAxisLimits? activeFocusZLimits;
         // 定标移动后的稳定等待；蛇形扫描使用下面独立的点内时序。
         private const int CalibrationSettlingDelayMilliseconds = 750;
         private const int ScanPointSettlingDelayMilliseconds = 350;
@@ -96,6 +113,11 @@ namespace MicroRaman
         // 常规定标先使用三个独立点快速校验；误差较大时再自动执行完整九点微调。
         // 这样不会以牺牲坐标精度为代价缩短定标时间。
         private const double FastVerificationTargetErrorPixels = 10.0;
+        private const double ProbeStepMillimeters = 0.0010;
+        // 高倍物镜下只允许在上一焦点附近的 ±10 μm 包络内寻找；超过即失败并回原位。
+        private const double MaximumLocalFocusTravelMillimeters = 0.010;
+        // 低于 50 通常已没有可用中心纹理；每个点仍必须完成上下探测后再决定是否保留原 Z。
+        private const double MinimumUsableFocusScore = 50.0;
 
         /// <summary>
         /// 获取当前控制器是否保存了可用于扫描的完整标定数据。
@@ -112,6 +134,19 @@ namespace MicroRaman
             }
         }
 
+        internal FocusSearchSetup GetFocusSearchSetup()
+        {
+            int zDimension = command.ReadZDimension();
+            double defaultDistance = MillimetersToDimensionUnits(MaximumLocalFocusTravelMillimeters, zDimension);
+            return new FocusSearchSetup
+            {
+                ZDimension = zDimension,
+                ZUnitDescription = GetDimensionUnitDescription(zDimension),
+                DefaultNegativeDistance = defaultDistance,
+                DefaultPositiveDistance = defaultDistance
+            };
+        }
+
         /// <summary>
         /// 清除像素与平台坐标标定；重新连接控制器或更换相机后必须调用。
         /// </summary>
@@ -122,6 +157,16 @@ namespace MicroRaman
             savedImageWidth = 0;
             savedImageHeight = 0;
             savedCalibrationZ = null;
+            ClearFocusMap();
+        }
+
+        /// <summary>
+        /// 框选区域或网格点数改变后废弃旧的绝对 XYZ 焦点表。
+        /// </summary>
+        internal void ClearFocusMap()
+        {
+            savedFocusPoints = null;
+            savedFocusZDimension = 0;
         }
 
         /// <summary>
@@ -286,7 +331,429 @@ namespace MicroRaman
         }
 
         /// <summary>
-        /// 使用已保存的标定矩阵按蛇形路径移动；全程只依赖绝对坐标和 ?pos，不读取图像纹理。
+        /// 在明场下预先计算框选网格每一点的绝对 XYZ 焦点位置，并始终返回开始前的位置。
+        /// </summary>
+        internal void CalculateFocusPositions(
+            CameraShowForm camera,
+            IList<PointF> normalizedPoints,
+            double maximumNegativeTravel,
+            double maximumPositiveTravel,
+            IProgress<string> progress,
+            CancellationToken cancellationToken)
+        {
+            if (!SerialPortManager.IsOpen)
+                throw new InvalidOperationException("请先连接 TANGO 控制器。");
+            if (!HasCalibration)
+                throw new InvalidOperationException("请先在当前人工焦点位置完成平台定标。");
+            if (normalizedPoints == null || normalizedPoints.Count == 0)
+                throw new InvalidOperationException("请先框选扫描区域。");
+            if (camera == null || camera.IsDisposed)
+                throw new InvalidOperationException("请先打开显微镜相机窗口。");
+            if (camera.CameraImageWidth != savedImageWidth || camera.CameraImageHeight != savedImageHeight)
+                throw new InvalidOperationException("相机分辨率已在定标后改变，请重新执行平台定标。");
+            if (double.IsNaN(maximumNegativeTravel) || double.IsInfinity(maximumNegativeTravel)
+                || double.IsNaN(maximumPositiveTravel) || double.IsInfinity(maximumPositiveTravel)
+                || maximumNegativeTravel <= 0.0 || maximumPositiveTravel <= 0.0)
+                throw new InvalidOperationException("上下移动最大距离必须填写为大于 0 的数字。");
+
+            int[] currentDimensions = command.ReadDimensions();
+            if (currentDimensions[0] != savedDimensions[0] || currentDimensions[1] != savedDimensions[1])
+                throw new InvalidOperationException("平台 X/Y 坐标单位已在定标后改变，请重新执行平台定标。");
+            int zDimension = command.ReadZDimension();
+            if (!command.IsZLimitControlEnabled())
+                throw new InvalidOperationException(
+                    "TANGO 的 Z 轴限位控制当前未启用（?limctr z != 1）。为防止高倍物镜碰撞，已拒绝自动微调。");
+            StageAxisLimits zLimits = command.ReadZSoftwareLimits();
+            if (zLimits.Lower >= zLimits.Upper)
+                throw new InvalidOperationException("TANGO 返回的 Z 轴软件限位无效，无法安全执行自动微调。");
+            // 在真正移动前完成所有物理步长到当前 ?dim z 单位的换算和合法性检查。
+            double probeStep = MillimetersToDimensionUnits(ProbeStepMillimeters, zDimension);
+
+            StagePosition origin = command.ReadPosition();
+            EnsureZWithinActiveLimits(origin.Z, zLimits);
+            if (HasCalibrationZChanged(origin.Z))
+                throw new InvalidOperationException("Z 轴已在平台定标后移动，请先在人工焦点位置重新执行平台定标。");
+
+            StagePixelCalibration calibration = savedCalibration;
+            var plannedPoints = new List<FocusedScanPoint>(normalizedPoints.Count);
+            for (int index = 0; index < normalizedPoints.Count; index++)
+            {
+                PointF normalized = normalizedPoints[index];
+                PointF imagePoint = new PointF(
+                    normalized.X * savedImageWidth,
+                    normalized.Y * savedImageHeight);
+                StagePosition target = calibration.ImagePointToStage(
+                    imagePoint,
+                    savedImageWidth,
+                    savedImageHeight,
+                    origin);
+                plannedPoints.Add(new FocusedScanPoint
+                {
+                    Normalized = normalized,
+                    Position = target
+                });
+            }
+
+            ClearFocusMap();
+            var completedPoints = new List<FocusedScanPoint>(plannedPoints.Count);
+
+            FocusSample manualReference = CaptureMedianFocusSample(camera, 3, cancellationToken);
+            if (manualReference.Score < MinimumUsableFocusScore)
+            {
+                throw new InvalidOperationException(string.Format(
+                    "开始位置的人工焦点清晰度不足（{0:F0}）。请先人工对焦清楚后再计算焦点位置。",
+                    manualReference.Score));
+            }
+            try
+            {
+                activeFocusZLimits = zLimits;
+                for (int index = 0; index < plannedPoints.Count; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    FocusedScanPoint planned = plannedPoints[index];
+                    progress.Report(string.Format("计算焦点 {0}/{1}", index + 1, plannedPoints.Count));
+
+                    MoveToAndVerify(planned.Position, savedDimensions);
+                    camera.WaitForFreshFrames(1, 15000, cancellationToken);
+                    StagePosition reached = command.ReadPosition();
+                    // 平台刚停下后的首帧可能仍处于画面过渡期；用连续三帧中值决定是否需要动 Z。
+                    FocusSample current = CaptureMedianFocusSample(camera, 3, cancellationToken);
+                    FindLocalFocus(
+                        camera,
+                        reached.Z,
+                        current,
+                        probeStep,
+                        maximumNegativeTravel,
+                        maximumPositiveTravel,
+                        zLimits,
+                        progress,
+                        cancellationToken);
+
+                    StagePosition actual = command.ReadPosition();
+                    completedPoints.Add(new FocusedScanPoint
+                    {
+                        Normalized = planned.Normalized,
+                        Position = actual
+                    });
+                }
+
+                savedFocusPoints = completedPoints;
+                savedFocusZDimension = zDimension;
+            }
+            finally
+            {
+                try
+                {
+                    // 无论成功、停止或异常，都回到点击按钮前的完整三轴绝对位置。
+                    command.MoveAbsoluteXYZ(origin.X, origin.Y, origin.Z);
+                    VerifyPositionXYZ(origin, command.ReadPosition(), savedDimensions, zDimension);
+                    camera.WaitForFreshFrames(2, 15000, CancellationToken.None);
+                }
+                finally
+                {
+                    activeFocusZLimits = null;
+                }
+            }
+        }
+
+        private FocusSample FindLocalFocus(
+            CameraShowForm camera,
+            double originZ,
+            FocusSample originSample,
+            double probeStep,
+            double maximumNegativeTravel,
+            double maximumPositiveTravel,
+            StageAxisLimits zLimits,
+            IProgress<string> progress,
+            CancellationToken cancellationToken)
+        {
+            double negativeLimit = Math.Max(zLimits.Lower, originZ - maximumNegativeTravel);
+            double positiveLimit = Math.Min(zLimits.Upper, originZ + maximumPositiveTravel);
+            FocusSample best = originSample;
+            double step = probeStep;
+
+            // 每一级都执行完全相同的流程：中心两侧各连续走两个同样的步长判断方向，
+            // 沿较清晰方向继续走到越过峰值，再把步长缩小十倍重新判断。
+            for (int level = 0; level < 2; level++)
+            {
+                progress.Report(string.Format(
+                    "焦点搜索：步长 {0:G6}，正负方向各探测两步",
+                    step));
+                bool directionImproved;
+                best = SearchFocusAtStep(
+                    camera, best, step, negativeLimit, positiveLimit,
+                    cancellationToken, out directionImproved);
+
+                // 到达新网格点时，如果原位本来就清楚，而且当前步长下正负方向
+                // 各走两次都更差，直接保留原 Z，不再进行更小步长的无谓移动。
+                if (level == 0
+                    && !directionImproved
+                    && best.Score >= MinimumUsableFocusScore)
+                {
+                    progress.Report(string.Format(
+                        "原位已清晰（{0:F0}），双向各两步均未改善，保留原 Z",
+                        best.Score));
+                    break;
+                }
+                step /= 10.0;
+            }
+
+            MoveZOnly(best.Z, camera, cancellationToken);
+            FocusSample verified = CaptureMedianFocusSample(camera, 3, cancellationToken);
+            if (verified.Score >= MinimumUsableFocusScore
+                && verified.Score >= best.Score * 0.70)
+                return verified;
+
+            MoveZOnly(originZ, camera, cancellationToken);
+            throw new InvalidOperationException(string.Format(
+                "当前点在用户输入的上下 Z 相对范围内未找到可用清晰位置（最佳清晰度 {0:F0}）。已中断并返回开始前位置。",
+                verified.Score));
+        }
+
+        private FocusSample SearchFocusAtStep(
+            CameraShowForm camera,
+            FocusSample center,
+            double step,
+            double lowerLimit,
+            double upperLimit,
+            CancellationToken cancellationToken,
+            out bool directionImproved)
+        {
+            directionImproved = false;
+            MoveZOnly(center.Z, camera, cancellationToken);
+            center = CaptureMedianFocusSample(camera, 3, cancellationToken);
+
+            FocusSample? positiveOne = CaptureProbeWithinRange(
+                camera, center.Z + step, lowerLimit, upperLimit, cancellationToken);
+            FocusSample? positiveTwo = CaptureProbeWithinRange(
+                camera, center.Z + 2.0 * step, lowerLimit, upperLimit, cancellationToken);
+
+            MoveZOnly(center.Z, camera, cancellationToken);
+            FocusSample? negativeOne = CaptureProbeWithinRange(
+                camera, center.Z - step, lowerLimit, upperLimit, cancellationToken);
+            FocusSample? negativeTwo = CaptureProbeWithinRange(
+                camera, center.Z - 2.0 * step, lowerLimit, upperLimit, cancellationToken);
+
+            MoveZOnly(center.Z, camera, cancellationToken);
+            FocusSample positiveBest = PickBestSample(center, positiveOne, positiveTwo);
+            FocusSample negativeBest = PickBestSample(center, negativeOne, negativeTwo);
+            if (positiveBest.Score <= center.Score && negativeBest.Score <= center.Score)
+                return center;
+
+            directionImproved = true;
+            bool searchPositive = positiveBest.Score >= negativeBest.Score;
+            FocusSample directionBest = searchPositive ? positiveBest : negativeBest;
+            FocusSample? directionTwo = searchPositive ? positiveTwo : negativeTwo;
+
+            // 第二个探测点仍在变清晰时，继续用当前步长前进；连续两个点都没有
+            // 刷新最佳值后即认为已经越过峰值，下一层在最佳点附近缩小步长。
+            if (directionTwo.HasValue && directionTwo.Value.Z == directionBest.Z)
+            {
+                double direction = searchPositive ? 1.0 : -1.0;
+                double targetZ = center.Z + direction * 3.0 * step;
+                int nonImprovingCount = 0;
+                while (targetZ >= lowerLimit && targetZ <= upperLimit && nonImprovingCount < 2)
+                {
+                    FocusSample current = MoveZAndCapture(camera, targetZ, cancellationToken);
+                    if (current.Score > directionBest.Score)
+                    {
+                        directionBest = current;
+                        nonImprovingCount = 0;
+                    }
+                    else
+                    {
+                        nonImprovingCount++;
+                    }
+                    targetZ += direction * step;
+                }
+            }
+
+            return directionBest;
+        }
+
+        private FocusSample? CaptureProbeWithinRange(
+            CameraShowForm camera,
+            double targetZ,
+            double lowerLimit,
+            double upperLimit,
+            CancellationToken cancellationToken)
+        {
+            if (targetZ < lowerLimit || targetZ > upperLimit)
+                return null;
+            return MoveZAndCapture(camera, targetZ, cancellationToken);
+        }
+
+        private static FocusSample PickBestSample(
+            FocusSample fallback,
+            FocusSample? first,
+            FocusSample? second)
+        {
+            FocusSample best = fallback;
+            if (first.HasValue && first.Value.Score > best.Score)
+                best = first.Value;
+            if (second.HasValue && second.Value.Score > best.Score)
+                best = second.Value;
+            return best;
+        }
+
+        private FocusSample MoveZAndCapture(
+            CameraShowForm camera,
+            double targetZ,
+            CancellationToken cancellationToken)
+        {
+            MoveZOnly(targetZ, camera, cancellationToken);
+            return CaptureFocusSample(camera, cancellationToken);
+        }
+
+        private void MoveZOnly(
+            double targetZ,
+            CameraShowForm camera,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!activeFocusZLimits.HasValue)
+                throw new InvalidOperationException("Z 轴安全限位尚未初始化，已拒绝移动。");
+            EnsureZWithinActiveLimits(targetZ, activeFocusZLimits.Value);
+            command.MoveAbsoluteZ(targetZ, false);
+            camera.WaitForFreshFrames(1, 15000, cancellationToken);
+        }
+
+        private static void EnsureZWithinActiveLimits(double targetZ, StageAxisLimits limits)
+        {
+            if (targetZ < limits.Lower || targetZ > limits.Upper)
+            {
+                throw new InvalidOperationException(string.Format(
+                    "Z 目标 {0:F6} 超出 TANGO 软件限位 [{1:F6}, {2:F6}]，已拒绝移动。",
+                    targetZ,
+                    limits.Lower,
+                    limits.Upper));
+            }
+        }
+
+        private FocusSample CaptureFocusSample(
+            CameraShowForm camera,
+            CancellationToken cancellationToken)
+        {
+            GrayFrameSnapshot frame = camera.CaptureGrayFrame(0, 15000, cancellationToken, 1024);
+            return new FocusSample(command.ReadPosition().Z, CalculateFocusScore(frame));
+        }
+
+        private FocusSample CaptureMedianFocusSample(
+            CameraShowForm camera,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            var samples = new List<FocusSample>(count);
+            for (int index = 0; index < count; index++)
+                samples.Add(CaptureFocusSample(camera, cancellationToken));
+            samples.Sort(delegate(FocusSample a, FocusSample b) { return a.Score.CompareTo(b.Score); });
+            return samples[samples.Count / 2];
+        }
+
+        private static double CalculateFocusScore(GrayFrameSnapshot frame)
+        {
+            int width = frame.Width;
+            int height = frame.Height;
+            byte[] pixels = frame.Pixels;
+            // 拉曼激光与采集光轴以相机画面中心为目标。只评价中心 10%×10% 区域，
+            // 避免边缘清晰纹理、框选边界或视场弯曲掩盖中心位置的失焦。
+            int roiWidth = Math.Max(32, width / 10);
+            int roiHeight = Math.Max(32, height / 10);
+            int left = Math.Max(1, (width - roiWidth) / 2);
+            int right = Math.Min(width - 1, left + roiWidth);
+            int top = Math.Max(1, (height - roiHeight) / 2);
+            int bottom = Math.Min(height - 1, top + roiHeight);
+            double score = 0;
+            long count = 0;
+
+            for (int y = top; y < bottom; y++)
+            {
+                int row0 = (y - 1) * width;
+                int row1 = y * width;
+                int row2 = (y + 1) * width;
+                for (int x = left; x < right; x++)
+                {
+                    int gx = pixels[row0 + x + 1] + 2 * pixels[row1 + x + 1] + pixels[row2 + x + 1]
+                        - pixels[row0 + x - 1] - 2 * pixels[row1 + x - 1] - pixels[row2 + x - 1];
+                    int gy = pixels[row2 + x - 1] + 2 * pixels[row2 + x] + pixels[row2 + x + 1]
+                        - pixels[row0 + x - 1] - 2 * pixels[row0 + x] - pixels[row0 + x + 1];
+                    double gradient = (double)gx * gx + (double)gy * gy;
+                    if (gradient >= 400.0)
+                        score += gradient;
+                    count++;
+                }
+            }
+            return count == 0 ? 0 : score / count;
+        }
+
+        private static double MillimetersToDimensionUnits(double millimeters, int dimension)
+        {
+            switch (dimension)
+            {
+                case 1:
+                case 10:
+                    return millimeters * 1000.0;
+                case 2:
+                case 9:
+                    return millimeters;
+                case 5:
+                    return millimeters / 10.0;
+                case 6:
+                    return millimeters / 1000.0;
+                case 7:
+                    return millimeters / 25.4;
+                case 8:
+                    return millimeters / 0.0254;
+                default:
+                    throw new InvalidOperationException(string.Format(
+                        "Z 轴 dim={0} 不是可安全换算的长度单位，无法计算焦点位置。",
+                        dimension));
+            }
+        }
+
+        private static string GetDimensionUnitDescription(int dimension)
+        {
+            switch (dimension)
+            {
+                case 1:
+                    return "μm（微米）";
+                case 2:
+                    return "mm（毫米）";
+                case 5:
+                    return "cm（厘米）";
+                case 6:
+                    return "m（米）";
+                case 7:
+                    return "inch（英寸）";
+                case 8:
+                    return "mil（1/1000 英寸）";
+                case 9:
+                    return "mm（毫米，速度单位也是 mm/s）";
+                case 10:
+                    return "μm（微米，速度单位也是 μm/s）";
+                default:
+                    return string.Format("dim={0}（当前软件不能安全换算自动步长）", dimension);
+            }
+        }
+
+        private bool HasMatchingFocusMap(IList<PointF> normalizedPoints)
+        {
+            if (savedFocusPoints == null || normalizedPoints == null
+                || savedFocusPoints.Count != normalizedPoints.Count)
+                return false;
+            for (int index = 0; index < normalizedPoints.Count; index++)
+            {
+                PointF saved = savedFocusPoints[index].Normalized;
+                PointF current = normalizedPoints[index];
+                if (Math.Abs(saved.X - current.X) > 0.0000001f
+                    || Math.Abs(saved.Y - current.Y) > 0.0000001f)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 有匹配焦点表时使用绝对 XYZ；否则保持当前 Z，仅按定标结果移动 XY。
         /// </summary>
         internal void Scan(
             CameraShowForm camera,
@@ -325,13 +792,21 @@ namespace MicroRaman
             if (currentDimensions[0] != savedDimensions[0] || currentDimensions[1] != savedDimensions[1])
                 throw new InvalidOperationException("平台坐标单位已在标定后改变，请重新执行平台定标。");
 
-            StagePosition scanOrigin = command.ReadPosition();
-            if (HasCalibrationZChanged(scanOrigin.Z))
+            bool useSavedFocusPositions = HasMatchingFocusMap(normalizedPoints);
+            int currentZDimension = 0;
+            if (useSavedFocusPositions)
             {
-                ResetOrigin();
-                throw new InvalidOperationException("检测到 Z 轴已在平台定标后移动。已清空标定缓存，请重新执行平台定标。");
+                currentZDimension = command.ReadZDimension();
+                if (currentZDimension != savedFocusZDimension)
+                    throw new InvalidOperationException("Z 轴坐标单位已在计算焦点后改变，请重新计算焦点位置。");
+                if (!command.IsZLimitControlEnabled())
+                    throw new InvalidOperationException("TANGO 的 Z 轴限位控制未启用，已拒绝执行 XYZ 扫描。");
+                StageAxisLimits currentZLimits = command.ReadZSoftwareLimits();
+                for (int index = 0; index < savedFocusPoints.Count; index++)
+                    EnsureZWithinActiveLimits(savedFocusPoints[index].Position.Z, currentZLimits);
             }
 
+            StagePosition scanOrigin = command.ReadPosition();
             StagePixelCalibration calibration = savedCalibration;
             camera.BeginFrozenScanPreview(cancellationToken);
 
@@ -346,24 +821,47 @@ namespace MicroRaman
                 progress.Report("光谱仪温控稳定中…");
                 warmUpSpectrum(cancellationToken);
                 camera.PrepareForNewScan();
+                progress.Report(useSavedFocusPositions
+                    ? "使用已保存焦点表，按绝对 XYZ 扫描"
+                    : "未使用焦点表，保持当前 Z 并仅移动 XY");
 
                 for (int index = 0; index < normalizedPoints.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     Stopwatch pointTimer = Stopwatch.StartNew();
                     PointF normalized = normalizedPoints[index];
-                    PointF imagePoint = new PointF(
-                        normalized.X * savedImageWidth,
-                        normalized.Y * savedImageHeight);
-                    StagePosition target = calibration.ImagePointToStage(
-                        imagePoint,
-                        savedImageWidth,
-                        savedImageHeight,
-                        scanOrigin);
+                    StagePosition target;
+                    if (useSavedFocusPositions)
+                    {
+                        target = savedFocusPoints[index].Position;
+                    }
+                    else
+                    {
+                        PointF imagePoint = new PointF(
+                            normalized.X * savedImageWidth,
+                            normalized.Y * savedImageHeight);
+                        target = calibration.ImagePointToStage(
+                            imagePoint,
+                            savedImageWidth,
+                            savedImageHeight,
+                            scanOrigin);
+                    }
 
                     progress.Report(string.Format("扫描 {0}/{1}", index + 1, normalizedPoints.Count));
-                    MoveToAndVerify(target, savedDimensions);
-                    VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+                    if (useSavedFocusPositions)
+                    {
+                        MoveToAndVerifyXYZ(target, savedDimensions, currentZDimension);
+                        VerifySettledScanPointXYZ(
+                            target,
+                            command.ReadPosition(),
+                            savedDimensions,
+                            currentZDimension);
+                    }
+                    else
+                    {
+                        MoveToAndVerify(target, savedDimensions);
+                        VerifySettledScanPoint(target, command.ReadPosition(), savedDimensions);
+                    }
                     WaitForScanDelay(ScanPointSettlingDelayMilliseconds, cancellationToken);
 
                     // 每一行只使用一张暗谱：第一点以及蛇形路径换行后的第一个点更新，
@@ -435,7 +933,18 @@ namespace MicroRaman
                     {
                         try
                         {
-                            ReturnToScanOrigin(camera, scanOrigin, savedDimensions);
+                            if (useSavedFocusPositions)
+                            {
+                                ReturnToScanOriginXYZ(
+                                    camera,
+                                    scanOrigin,
+                                    savedDimensions,
+                                    currentZDimension);
+                            }
+                            else
+                            {
+                                ReturnToScanOrigin(camera, scanOrigin, savedDimensions);
+                            }
                         }
                         finally
                         {
@@ -723,6 +1232,28 @@ namespace MicroRaman
 
         }
 
+        private void MoveToAndVerifyXYZ(StagePosition target, int[] dimensions, int zDimension)
+        {
+            command.MoveAbsoluteXYZ(target.X, target.Y, target.Z);
+            StagePosition actual = command.ReadPosition();
+            if (IsAtTargetXYZ(target, actual, dimensions, zDimension))
+                return;
+
+            command.MoveAbsoluteXYZ(target.X, target.Y, target.Z);
+            actual = command.ReadPosition();
+            if (!IsAtTargetXYZ(target, actual, dimensions, zDimension))
+            {
+                throw new InvalidOperationException(string.Format(
+                    "平台未到达目标 XYZ：目标 ({0:F4}, {1:F4}, {2:F4})，实际 ({3:F4}, {4:F4}, {5:F4})。",
+                    target.X,
+                    target.Y,
+                    target.Z,
+                    actual.X,
+                    actual.Y,
+                    actual.Z));
+            }
+        }
+
         /// <summary>
         /// 判断平台实测 X、Y 坐标是否处于目标坐标容差范围内。
         /// </summary>
@@ -730,6 +1261,16 @@ namespace MicroRaman
         {
             return Math.Abs(actual.X - target.X) <= GetPositionTolerance(dimensions[0])
                 && Math.Abs(actual.Y - target.Y) <= GetPositionTolerance(dimensions[1]);
+        }
+
+        private static bool IsAtTargetXYZ(
+            StagePosition target,
+            StagePosition actual,
+            int[] dimensions,
+            int zDimension)
+        {
+            return IsAtTarget(target, actual, dimensions)
+                && Math.Abs(actual.Z - target.Z) <= GetPositionTolerance(zDimension);
         }
 
         /// <summary>
@@ -757,6 +1298,25 @@ namespace MicroRaman
                 target.Y,
                 actual.X,
                 actual.Y));
+        }
+
+        private static void VerifySettledScanPointXYZ(
+            StagePosition target,
+            StagePosition actual,
+            int[] dimensions,
+            int zDimension)
+        {
+            if (IsAtTargetXYZ(target, actual, dimensions, zDimension))
+                return;
+
+            throw new InvalidOperationException(string.Format(
+                "平台稳定后偏离扫描点：目标 ({0:F4}, {1:F4}, {2:F4})，实际 ({3:F4}, {4:F4}, {5:F4})。",
+                target.X,
+                target.Y,
+                target.Z,
+                actual.X,
+                actual.Y,
+                actual.Z));
         }
 
         /// <summary>
@@ -840,6 +1400,21 @@ namespace MicroRaman
             camera.SetTemporaryOverlayPixelOffset(0, 0);
         }
 
+        private void ReturnToScanOriginXYZ(
+            CameraShowForm camera,
+            StagePosition origin,
+            int[] dimensions,
+            int zDimension)
+        {
+            command.MoveAbsoluteXYZ(origin.X, origin.Y, origin.Z);
+            WaitForScanDelay(ScanPointSettlingDelayMilliseconds, CancellationToken.None);
+
+            StagePosition actual = command.ReadPosition();
+            VerifyPositionXYZ(origin, actual, dimensions, zDimension);
+            camera.WaitForFreshFrames(2, 10000, CancellationToken.None);
+            camera.SetTemporaryOverlayPixelOffset(0, 0);
+        }
+
         /// <summary>
         /// 验证平台实测位置是否已经返回指定位置。
         /// </summary>
@@ -847,6 +1422,16 @@ namespace MicroRaman
         {
             if (!IsAtTarget(expected, actual, dimensions))
                 throw new InvalidOperationException("平台未返回预期位置，请检查平台状态和软限位。");
+        }
+
+        private static void VerifyPositionXYZ(
+            StagePosition expected,
+            StagePosition actual,
+            int[] dimensions,
+            int zDimension)
+        {
+            if (!IsAtTargetXYZ(expected, actual, dimensions, zDimension))
+                throw new InvalidOperationException("平台未返回预期 XYZ 位置，请检查平台状态和软限位。");
         }
 
         /// <summary>
@@ -894,6 +1479,24 @@ namespace MicroRaman
             internal double DeltaX;
             internal double DeltaY;
             internal string Name;
+        }
+
+        private sealed class FocusedScanPoint
+        {
+            internal PointF Normalized;
+            internal StagePosition Position;
+        }
+
+        private struct FocusSample
+        {
+            internal FocusSample(double z, double score)
+            {
+                Z = z;
+                Score = score;
+            }
+
+            internal double Z;
+            internal double Score;
         }
     }
 }
